@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<title>Estoque da Papelaria</title>
+
+<link rel="stylesheet" href="style.css">
+
+</head>
+
+<body>
+
+<div class="container">
+
+<h1>Estoque da Papelaria</h1>
+<p class="subtitulo">Controle simples e prático dos produtos</p>
+
+<div class="card formulario">
+
+<input type="text" id="nomeProduto" placeholder="Nome do produto">
+
+<input type="number" id="quantidadeProduto" placeholder="Quantidade" min="1">
+
+<input type="text" id="imagemProduto" placeholder="URL da imagem">
+
+<button onclick="adicionarProduto()">Adicionar Produto</button>
+
+</div>
+
+<div class="card resumo">
+
+<h2>Resumo do Estoque</h2>
+
+<p id="totalProdutos">Total de produtos: 0</p>
+
+<p id="totalItens">Total de itens no estoque: 0</p>
+
+</div>
+
+<div class="card lista-card">
+
+<h2>Produtos no estoque</h2>
+
+<ul id="listaProdutos"></ul>
+
+</div>
+
+</div>
+
+
+<script type="module">
+
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-app.js";
+import { getFirestore } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-firestore.js";
+
+const firebaseConfig = {
+apiKey: "AIzaSyBnFxoOAIn_k1_kWiW0rv7uD2SWsgQytxM",
+authDomain: "estoque-papelaria.firebaseapp.com",
+projectId: "estoque-papelaria",
+storageBucket: "estoque-papelaria.firebasestorage.app",
+messagingSenderId: "406503306850",
+appId: "1:406503306850:web:f6c86c32c328fd896f033b"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+
+window.db = db;
+
+</script>
+
+<script src="script.js" type="module"></script>
+
+</body>
+</html>
