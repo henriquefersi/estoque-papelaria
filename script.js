@@ -42,9 +42,22 @@ fileInput.addEventListener("change", (e) => {
 
   const reader = new FileReader();
   reader.onload = (ev) => {
-    imagemBase64 = ev.target.result;
-    preview.src = imagemBase64;
-    uploadArea.classList.add("has-image");
+    const img = new Image();
+    img.onload = () => {
+      // Reduz para no máximo 400px de largura mantendo proporção
+      const MAX = 400;
+      const scale = Math.min(1, MAX / img.width);
+      const canvas = document.createElement("canvas");
+      canvas.width  = img.width  * scale;
+      canvas.height = img.height * scale;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      // Comprime para JPEG com qualidade 70%
+      imagemBase64 = canvas.toDataURL("image/jpeg", 0.7);
+      preview.src = imagemBase64;
+      uploadArea.classList.add("has-image");
+    };
+    img.src = ev.target.result;
   };
   reader.readAsDataURL(file);
 });
