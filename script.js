@@ -44,7 +44,6 @@ fileInput.addEventListener("change", (e) => {
   reader.onload = (ev) => {
     const img = new Image();
     img.onload = () => {
-      // Reduz para no máximo 400px de largura mantendo proporção
       const MAX = 400;
       const scale = Math.min(1, MAX / img.width);
       const canvas = document.createElement("canvas");
@@ -52,7 +51,6 @@ fileInput.addEventListener("change", (e) => {
       canvas.height = img.height * scale;
       const ctx = canvas.getContext("2d");
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-      // Comprime para JPEG com qualidade 70%
       imagemBase64 = canvas.toDataURL("image/jpeg", 0.7);
       preview.src = imagemBase64;
       uploadArea.classList.add("has-image");
@@ -151,20 +149,52 @@ window.adicionarProduto = async function () {
 
   btn.disabled = true;
   spinner.classList.add("ativo");
-  btnText.textContent = "Adicionando...";
+  btnText.textContent = "Verificando...";
 
   try {
-    await addDoc(collection(window.db, "produtos"), {
-      nome,
-      quantidade,
-      imagem: imagemBase64 || ""
+    // Verifica se já existe um produto com o mesmo nome (sem diferenciar maiúsculas)
+    const querySnapshot = await getDocs(collection(window.db, "produtos"));
+    let produtoExistente = null;
+
+    querySnapshot.forEach((documento) => {
+      const dados = documento.data();
+      if (dados.nome.toLowerCase().trim() === nome.toLowerCase()) {
+        produtoExistente = { id: documento.id, ...dados };
+      }
     });
 
-    document.getElementById("nomeProduto").value = "";
-    document.getElementById("quantidadeProduto").value = "";
-    resetUpload();
-    showToast(`"${nome}" adicionado ao estoque!`);
-    await mostrarProdutos();
+    if (produtoExistente) {
+      // Pergunta se quer somar ao existente
+      const confirmar = confirm(`"${produtoExistente.nome}" já existe no estoque com ${produtoExistente.quantidade} unidade(s).\n\nDeseja somar +${quantidade} ao estoque existente?`);
+
+      if (confirmar) {
+        const novaQuantidade = Number(produtoExistente.quantidade) + quantidade;
+        await updateDoc(doc(window.db, "produtos", produtoExistente.id), {
+          quantidade: novaQuantidade
+        });
+        document.getElementById("nomeProduto").value = "";
+        document.getElementById("quantidadeProduto").value = "";
+        resetUpload();
+        showToast(`Estoque de "${produtoExistente.nome}" atualizado para ${novaQuantidade}!`);
+        await mostrarProdutos();
+      } else {
+        showToast("Operação cancelada", "ℹ️");
+      }
+
+    } else {
+      // Produto novo — adiciona normalmente
+      btnText.textContent = "Adicionando...";
+      await addDoc(collection(window.db, "produtos"), {
+        nome,
+        quantidade,
+        imagem: imagemBase64 || ""
+      });
+      document.getElementById("nomeProduto").value = "";
+      document.getElementById("quantidadeProduto").value = "";
+      resetUpload();
+      showToast(`"${nome}" adicionado ao estoque!`);
+      await mostrarProdutos();
+    }
 
   } catch (err) {
     showToast("Erro ao adicionar produto", "❌");
