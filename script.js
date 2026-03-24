@@ -1,132 +1,216 @@
 import {
-collection,
-addDoc,
-getDocs,
-doc,
-updateDoc,
-deleteDoc
+  collection,
+  addDoc,
+  getDocs,
+  doc,
+  updateDoc,
+  deleteDoc
 } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-firestore.js";
 
 const lista = document.getElementById("listaProdutos");
+const overlay = document.getElementById("loadingOverlay");
+const toast = document.getElementById("toast");
 
-async function mostrarProdutos(){
+/* ── Helpers de UI ── */
 
-lista.innerHTML = "";
+function showLoading(msg = "Carregando...") {
+  document.getElementById("loadingMsg").textContent = msg;
+  overlay.classList.add("ativo");
+}
 
-const querySnapshot = await getDocs(collection(window.db,"produtos"));
+function hideLoading() {
+  overlay.classList.remove("ativo");
+}
 
-let totalProdutos = 0;
-let totalItens = 0;
+function showToast(msg, emoji = "✅") {
+  toast.textContent = `${emoji} ${msg}`;
+  toast.classList.add("show");
+  setTimeout(() => toast.classList.remove("show"), 2800);
+}
 
-querySnapshot.forEach((documento)=>{
+/* ── Upload de imagem ── */
 
-const produto = documento.data();
-const id = documento.id;
+let imagemBase64 = "";
 
-const quantidade = Number(produto.quantidade) || 0;
-const imagem = produto.imagem || "https://via.placeholder.com/50";
+const uploadArea  = document.getElementById("uploadArea");
+const fileInput   = document.getElementById("fileInput");
+const preview     = document.getElementById("uploadPreview");
 
-lista.innerHTML += `
-<li class="produto-item">
+fileInput.addEventListener("change", (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
 
-<img src="${imagem}" class="img-produto">
-
-<div class="produto-info">
-<span class="nome-produto">${produto.nome}</span>
-<span class="quantidade-produto">Quantidade: ${quantidade}</span>
-</div>
-
-<div class="acoes">
-<button class="btn-mais" onclick="aumentar('${id}', ${quantidade})">+</button>
-<button class="btn-menos" onclick="diminuir('${id}', ${quantidade})">-</button>
-<button class="btn-remover" onclick="remover('${id}')">🗑</button>
-</div>
-
-</li>
-`;
-
-totalProdutos++;
-totalItens += quantidade;
-
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    imagemBase64 = ev.target.result;
+    preview.src = imagemBase64;
+    uploadArea.classList.add("has-image");
+  };
+  reader.readAsDataURL(file);
 });
 
-document.getElementById("totalProdutos").innerText =
-"Total de produtos: " + totalProdutos;
+function resetUpload() {
+  imagemBase64 = "";
+  preview.src = "";
+  uploadArea.classList.remove("has-image");
+  fileInput.value = "";
+}
 
-document.getElementById("totalItens").innerText =
-"Total de itens no estoque: " + totalItens;
+/* ── Listar produtos ── */
 
+async function mostrarProdutos() {
+  showLoading("Buscando produtos...");
+  lista.innerHTML = "";
+
+  try {
+    const querySnapshot = await getDocs(collection(window.db, "produtos"));
+
+    let totalProdutos = 0;
+    let totalItens = 0;
+
+    if (querySnapshot.empty) {
+      lista.innerHTML = `
+        <div class="lista-vazia">
+          <div class="lista-vazia-icon">📦</div>
+          <p>Nenhum produto cadastrado ainda.</p>
+        </div>`;
+    }
+
+    querySnapshot.forEach((documento) => {
+      const produto = documento.data();
+      const id = documento.id;
+      const quantidade = Number(produto.quantidade) || 0;
+      const imagem = produto.imagem || "https://placehold.co/52x52/1a1a24/8888aa?text=?";
+      const estoqueClass = quantidade <= 2 ? "estoque-baixo" : "";
+      const estoqueLabel = quantidade <= 2 ? `⚠️ ${quantidade}` : quantidade;
+
+      const li = document.createElement("li");
+      li.className = "produto-item";
+      li.innerHTML = `
+        <img src="${imagem}" class="img-produto" onerror="this.src='https://placehold.co/52x52/1a1a24/8888aa?text=?'">
+        <div class="produto-info">
+          <span class="nome-produto">${produto.nome}</span>
+          <span class="quantidade-produto ${estoqueClass}">Quantidade: ${estoqueLabel}</span>
+        </div>
+        <div class="acoes">
+          <button class="btn-acao btn-mais"  title="Aumentar">+</button>
+          <button class="btn-acao btn-menos" title="Diminuir">−</button>
+          <button class="btn-acao btn-remover" title="Remover">🗑</button>
+        </div>
+      `;
+
+      li.querySelector(".btn-mais").addEventListener("click", () => aumentar(id, quantidade));
+      li.querySelector(".btn-menos").addEventListener("click", () => diminuir(id, quantidade));
+      li.querySelector(".btn-remover").addEventListener("click", () => confirmarRemover(id, produto.nome));
+
+      lista.appendChild(li);
+
+      totalProdutos++;
+      totalItens += quantidade;
+    });
+
+    document.getElementById("totalProdutos").textContent = totalProdutos;
+    document.getElementById("totalItens").textContent = totalItens;
+
+  } catch (err) {
+    showToast("Erro ao carregar produtos", "❌");
+    console.error(err);
+  } finally {
+    hideLoading();
+  }
 }
 
 window.mostrarProdutos = mostrarProdutos;
 
+/* ── Adicionar produto ── */
 
-window.adicionarProduto = async function(){
+window.adicionarProduto = async function () {
+  const nome = document.getElementById("nomeProduto").value.trim();
+  const quantidade = parseInt(document.getElementById("quantidadeProduto").value);
+  const btn = document.getElementById("btnAdicionar");
+  const spinner = document.getElementById("btnSpinner");
+  const btnText = document.getElementById("btnText");
 
-let nome = document.getElementById("nomeProduto").value;
+  if (!nome || isNaN(quantidade) || quantidade < 1) {
+    showToast("Preencha o nome e a quantidade corretamente", "⚠️");
+    return;
+  }
 
-let quantidade = parseInt(
-document.getElementById("quantidadeProduto").value
-);
+  btn.disabled = true;
+  spinner.classList.add("ativo");
+  btnText.textContent = "Adicionando...";
 
-let imagem = document.getElementById("imagemProduto").value;
+  try {
+    await addDoc(collection(window.db, "produtos"), {
+      nome,
+      quantidade,
+      imagem: imagemBase64 || ""
+    });
 
-if(!nome || !quantidade){
-alert("Preencha os campos");
-return;
+    document.getElementById("nomeProduto").value = "";
+    document.getElementById("quantidadeProduto").value = "";
+    resetUpload();
+    showToast(`"${nome}" adicionado ao estoque!`);
+    await mostrarProdutos();
+
+  } catch (err) {
+    showToast("Erro ao adicionar produto", "❌");
+    console.error(err);
+  } finally {
+    btn.disabled = false;
+    spinner.classList.remove("ativo");
+    btnText.textContent = "Adicionar Produto";
+  }
+};
+
+/* ── Aumentar ── */
+
+async function aumentar(id, quantidade) {
+  showLoading("Atualizando...");
+  try {
+    await updateDoc(doc(window.db, "produtos", id), { quantidade: quantidade + 1 });
+    await mostrarProdutos();
+  } catch (err) {
+    showToast("Erro ao atualizar", "❌");
+    hideLoading();
+  }
 }
 
-await addDoc(collection(window.db,"produtos"),{
-nome:nome,
-quantidade:quantidade,
-imagem:imagem
-});
+/* ── Diminuir ── */
 
-document.getElementById("nomeProduto").value = "";
-document.getElementById("quantidadeProduto").value = "";
-document.getElementById("imagemProduto").value = "";
-
-mostrarProdutos();
-
+async function diminuir(id, quantidade) {
+  if (quantidade <= 0) {
+    showToast("Quantidade já está em zero", "⚠️");
+    return;
+  }
+  showLoading("Atualizando...");
+  try {
+    await updateDoc(doc(window.db, "produtos", id), { quantidade: quantidade - 1 });
+    await mostrarProdutos();
+  } catch (err) {
+    showToast("Erro ao atualizar", "❌");
+    hideLoading();
+  }
 }
 
+/* ── Remover com confirmação ── */
 
-window.aumentar = async function(id, quantidade){
-
-const ref = doc(window.db,"produtos",id);
-
-await updateDoc(ref,{
-quantidade: quantidade + 1
-});
-
-mostrarProdutos();
-
+function confirmarRemover(id, nome) {
+  const confirmado = confirm(`Remover "${nome}" do estoque?`);
+  if (confirmado) remover(id, nome);
 }
 
-
-window.diminuir = async function(id, quantidade){
-
-if(quantidade <= 0) return;
-
-const ref = doc(window.db,"produtos",id);
-
-await updateDoc(ref,{
-quantidade: quantidade - 1
-});
-
-mostrarProdutos();
-
+async function remover(id, nome) {
+  showLoading("Removendo produto...");
+  try {
+    await deleteDoc(doc(window.db, "produtos", id));
+    showToast(`"${nome}" removido`, "🗑️");
+    await mostrarProdutos();
+  } catch (err) {
+    showToast("Erro ao remover", "❌");
+    hideLoading();
+  }
 }
 
-
-window.remover = async function(id){
-
-const ref = doc(window.db,"produtos",id);
-
-await deleteDoc(ref);
-
-mostrarProdutos();
-
-}
-
+/* ── Init ── */
 mostrarProdutos();

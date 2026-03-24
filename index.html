@@ -1,77 +1,105 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-
-<title>Estoque da Papelaria</title>
-
-<link rel="stylesheet" href="style.css">
-
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Estoque da Papelaria</title>
+  <link rel="stylesheet" href="style.css">
 </head>
-
 <body>
 
-<div class="container">
+  <!-- Loading Overlay -->
+  <div class="loading-overlay" id="loadingOverlay">
+    <div class="loading-card">
+      <div class="loading-spinner-grande"></div>
+      <p class="loading-msg" id="loadingMsg">Carregando...</p>
+    </div>
+  </div>
 
-<h1>Estoque da Papelaria</h1>
-<p class="subtitulo">Controle simples e prático dos produtos</p>
+  <!-- Toast -->
+  <div class="toast" id="toast"></div>
 
-<div class="card formulario">
+  <div class="container">
 
-<input type="text" id="nomeProduto" placeholder="Nome do produto">
+    <!-- Header -->
+    <div class="header">
+      <div class="header-badge">📎 Papelaria</div>
+      <h1>Estoque</h1>
+      <p class="subtitulo">Controle simples e prático dos seus produtos</p>
+    </div>
 
-<input type="number" id="quantidadeProduto" placeholder="Quantidade" min="1">
+    <!-- Formulário -->
+    <div class="card">
+      <h2>Novo Produto</h2>
+      <div class="formulario">
 
-<input type="text" id="imagemProduto" placeholder="URL da imagem">
+        <input type="text" id="nomeProduto" placeholder="Nome do produto">
 
-<button onclick="adicionarProduto()">Adicionar Produto</button>
+        <input type="number" id="quantidadeProduto" placeholder="Quantidade inicial" min="1">
 
-</div>
+        <!-- Upload de imagem -->
+        <div class="upload-area" id="uploadArea">
+          <input type="file" id="fileInput" accept="image/*">
+          <div class="upload-placeholder">
+            <div class="upload-icon">🖼️</div>
+            <div class="upload-text">
+              <strong>Clique para enviar</strong> uma foto do produto<br>
+              <span>JPG, PNG, WEBP</span>
+            </div>
+          </div>
+          <img class="upload-preview" id="uploadPreview" alt="Preview">
+        </div>
 
-<div class="card resumo">
+        <button class="btn-primary" id="btnAdicionar" onclick="adicionarProduto()">
+          <div class="spinner" id="btnSpinner"></div>
+          <span id="btnText">Adicionar Produto</span>
+        </button>
 
-<h2>Resumo do Estoque</h2>
+      </div>
+    </div>
 
-<p id="totalProdutos">Total de produtos: 0</p>
+    <!-- Resumo -->
+    <div class="card">
+      <h2>Resumo do Estoque</h2>
+      <div class="resumo-grid">
+        <div class="resumo-item">
+          <div class="resumo-label">Produtos</div>
+          <div class="resumo-valor" id="totalProdutos">—</div>
+        </div>
+        <div class="resumo-item">
+          <div class="resumo-label">Total de itens</div>
+          <div class="resumo-valor" id="totalItens">—</div>
+        </div>
+      </div>
+    </div>
 
-<p id="totalItens">Total de itens no estoque: 0</p>
+    <!-- Lista -->
+    <div class="card">
+      <h2>Produtos no Estoque</h2>
+      <ul id="listaProdutos"></ul>
+    </div>
 
-</div>
+  </div>
 
-<div class="card lista-card">
+  <!-- Firebase -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-app.js";
+    import { getFirestore } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-firestore.js";
 
-<h2>Produtos no estoque</h2>
+    const firebaseConfig = {
+      apiKey: "AIzaSyBnFxoOAIn_k1_kWiW0rv7uD2SWsgQytxM",
+      authDomain: "estoque-papelaria.firebaseapp.com",
+      projectId: "estoque-papelaria",
+      storageBucket: "estoque-papelaria.firebasestorage.app",
+      messagingSenderId: "406503306850",
+      appId: "1:406503306850:web:f6c86c32c328fd896f033b"
+    };
 
-<ul id="listaProdutos"></ul>
+    const app = initializeApp(firebaseConfig);
+    window.db = getFirestore(app);
+  </script>
 
-</div>
-
-</div>
-
-
-<script type="module">
-
-import { initializeApp } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-app.js";
-import { getFirestore } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-firestore.js";
-
-const firebaseConfig = {
-apiKey: "AIzaSyBnFxoOAIn_k1_kWiW0rv7uD2SWsgQytxM",
-authDomain: "estoque-papelaria.firebaseapp.com",
-projectId: "estoque-papelaria",
-storageBucket: "estoque-papelaria.firebasestorage.app",
-messagingSenderId: "406503306850",
-appId: "1:406503306850:web:f6c86c32c328fd896f033b"
-};
-
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
-
-window.db = db;
-
-</script>
-
-<script src="script.js" type="module"></script>
+  <script src="script.js" type="module"></script>
 
 </body>
 </html>
