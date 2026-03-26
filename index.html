@@ -42,19 +42,23 @@
     </div>
   </div>
 
-  <!-- Modal: Remover quantidade -->
+  <!-- Modal: Ajustar quantidade -->
   <div class="modal-overlay" id="modalRemoverQtd">
     <div class="modal-box">
-      <h3 class="modal-titulo">➖ Remover Quantidade</h3>
+      <h3 class="modal-titulo">📦 Ajustar Quantidade</h3>
       <p class="modal-desc">Estoque atual: <strong id="modalRemoverAtual">0</strong></p>
-      <input type="number" id="inputRemoverQtd" placeholder="Quanto quer remover?" min="1">
-      <div class="modal-acoes">
-        <button class="btn-modal-cancel" onclick="fecharModalRemoverQtd()">Cancelar</button>
-        <button class="btn-modal-confirm btn-danger" onclick="confirmarRemoverQtd()">
-          <div class="spinner" id="spinnerRemoverQtd"></div>
-          <span id="textoRemoverQtd">Remover</span>
+      <input type="number" id="inputRemoverQtd" placeholder="Digite a quantidade" min="1">
+      <div class="ajuste-btns">
+        <button class="btn-ajuste btn-ajuste-add" onclick="confirmarAjusteQtd('add')">
+          <div class="spinner" id="spinnerAjusteAdd"></div>
+          <span id="textoAjusteAdd">➕ Adicionar</span>
+        </button>
+        <button class="btn-ajuste btn-ajuste-rem" onclick="confirmarAjusteQtd('rem')">
+          <div class="spinner" id="spinnerAjusteRem"></div>
+          <span id="textoAjusteRem">➖ Remover</span>
         </button>
       </div>
+      <button class="btn-modal-cancel" style="width:100%" onclick="fecharModalRemoverQtd()">Cancelar</button>
     </div>
   </div>
 

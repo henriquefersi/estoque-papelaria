@@ -282,7 +282,7 @@ window.fecharModalRemoverQtd = function () {
   fecharModal("modalRemoverQtd");
 };
 
-window.confirmarRemoverQtd = async function () {
+window.confirmarAjusteQtd = async function (tipo) {
   const qtd = parseInt(document.getElementById("inputRemoverQtd").value);
 
   if (isNaN(qtd) || qtd < 1) {
@@ -290,25 +290,33 @@ window.confirmarRemoverQtd = async function () {
     return;
   }
 
-  if (qtd > _removerQtdAtual) {
+  if (tipo === "rem" && qtd > _removerQtdAtual) {
     showToast(`Estoque atual é só ${_removerQtdAtual}`, "⚠️");
     return;
   }
 
-  const btn     = document.querySelector("#modalRemoverQtd .btn-modal-confirm");
-  const spinner = document.getElementById("spinnerRemoverQtd");
-  const texto   = document.getElementById("textoRemoverQtd");
+  const isAdd    = tipo === "add";
+  const spinnerId = isAdd ? "spinnerAjusteAdd" : "spinnerAjusteRem";
+  const textoId   = isAdd ? "textoAjusteAdd"   : "textoAjusteRem";
+  const btnSel    = isAdd ? ".btn-ajuste-add"   : ".btn-ajuste-rem";
+  const btn       = document.querySelector(`#modalRemoverQtd ${btnSel}`);
+  const spinner   = document.getElementById(spinnerId);
+  const texto     = document.getElementById(textoId);
 
   btn.disabled = true;
   spinner.classList.add("ativo");
-  texto.textContent = "Removendo...";
+  texto.textContent = isAdd ? "Adicionando..." : "Removendo...";
+
+  const novaQtd = isAdd ? _removerQtdAtual + qtd : _removerQtdAtual - qtd;
 
   try {
-    await updateDoc(doc(window.db, "produtos", _removerQtdId), {
-      quantidade: _removerQtdAtual - qtd
-    });
+    await updateDoc(doc(window.db, "produtos", _removerQtdId), { quantidade: novaQtd });
     fecharModal("modalRemoverQtd");
-    showToast(`${qtd} unidade(s) removida(s) de "${_removerQtdNome}"`);
+    showToast(
+      isAdd
+        ? `+${qtd} adicionado(s) a "${_removerQtdNome}"`
+        : `−${qtd} removido(s) de "${_removerQtdNome}"`
+    );
     await mostrarProdutos();
   } catch (err) {
     showToast("Erro ao atualizar", "❌");
@@ -316,7 +324,7 @@ window.confirmarRemoverQtd = async function () {
   } finally {
     btn.disabled = false;
     spinner.classList.remove("ativo");
-    texto.textContent = "Remover";
+    texto.textContent = isAdd ? "➕ Adicionar" : "➖ Remover";
   }
 };
 
