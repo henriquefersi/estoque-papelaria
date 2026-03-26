@@ -20,10 +20,10 @@
   <div class="toast" id="toast"></div>
 
   <!-- Modal: Ampliar foto -->
-  <div class="modal-overlay" id="modalFoto" onclick="fecharModalFoto()">
-    <div class="modal-foto-box" onclick="event.stopPropagation()">
+  <div class="modal-overlay" id="modalFoto">
+    <div class="modal-foto-box">
       <img id="modalFotoImg" src="" alt="Foto do produto">
-      <button class="modal-fechar" onclick="fecharModalFoto()">✕</button>
+      <button class="modal-fechar" id="btnFecharFoto">✕</button>
     </div>
   </div>
 
@@ -33,8 +33,8 @@
       <h3 class="modal-titulo">✏️ Editar Produto</h3>
       <input type="text" id="inputEditarNome" placeholder="Novo nome do produto">
       <div class="modal-acoes">
-        <button class="btn-modal-cancel" onclick="fecharModalEditar()">Cancelar</button>
-        <button class="btn-modal-confirm" onclick="salvarEdicao()">
+        <button class="btn-modal-cancel" id="btnCancelarEditar">Cancelar</button>
+        <button class="btn-modal-confirm" id="btnSalvarEditar">
           <div class="spinner" id="spinnerEditar"></div>
           <span id="textoSalvar">Salvar</span>
         </button>
@@ -49,16 +49,16 @@
       <p class="modal-desc">Estoque atual: <strong id="modalRemoverAtual">0</strong></p>
       <input type="number" id="inputRemoverQtd" placeholder="Digite a quantidade" min="1">
       <div class="ajuste-btns">
-        <button class="btn-ajuste btn-ajuste-add" onclick="confirmarAjusteQtd('add')">
+        <button class="btn-ajuste btn-ajuste-add" id="btnAjusteAdd">
           <div class="spinner" id="spinnerAjusteAdd"></div>
           <span id="textoAjusteAdd">➕ Adicionar</span>
         </button>
-        <button class="btn-ajuste btn-ajuste-rem" onclick="confirmarAjusteQtd('rem')">
+        <button class="btn-ajuste btn-ajuste-rem" id="btnAjusteRem">
           <div class="spinner" id="spinnerAjusteRem"></div>
           <span id="textoAjusteRem">➖ Remover</span>
         </button>
       </div>
-      <button class="btn-modal-cancel" style="width:100%" onclick="fecharModalRemoverQtd()">Cancelar</button>
+      <button class="btn-modal-cancel" style="width:100%" id="btnCancelarAjuste">Cancelar</button>
     </div>
   </div>
 
@@ -69,7 +69,7 @@
       <p class="modal-desc">Digite ou escaneie o código do produto</p>
       <div class="barcode-input-row">
         <input type="text" id="inputBarcode" placeholder="Ex: 7891234567890" inputmode="numeric">
-        <button class="btn-scan" id="btnScan" onclick="alternarScanner()" title="Usar câmera">📷</button>
+        <button class="btn-scan" id="btnScan" title="Usar câmera">📷</button>
       </div>
       <div id="scannerArea" style="display:none">
         <video id="scannerVideo" autoplay playsinline muted></video>
@@ -77,8 +77,8 @@
       </div>
       <div id="barcodeResultado" class="barcode-resultado" style="display:none"></div>
       <div class="modal-acoes">
-        <button class="btn-modal-cancel" onclick="fecharModalBarcode()">Fechar</button>
-        <button class="btn-modal-confirm" onclick="buscarPorBarcode()">Buscar</button>
+        <button class="btn-modal-cancel" id="btnFecharBarcode">Fechar</button>
+        <button class="btn-modal-confirm" id="btnBuscarBarcode">Buscar</button>
       </div>
     </div>
   </div>
@@ -97,9 +97,9 @@
       <div class="busca-row">
         <div class="busca-wrap">
           <span class="busca-icon">🔎</span>
-          <input type="text" id="campoBusca" placeholder="Buscar produto..." oninput="filtrarProdutos()">
+          <input type="text" id="campoBusca" placeholder="Buscar produto...">
         </div>
-        <button class="btn-barcode" onclick="abrirModalBarcode()" title="Buscar por código de barras">
+        <button class="btn-barcode" id="btnAbrirBarcode" title="Buscar por código de barras">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
             <rect x="1" y="3" width="2" height="18" rx="0.5"/>
             <rect x="5" y="3" width="1" height="18" rx="0.5"/>
@@ -132,7 +132,7 @@
           <img class="upload-preview" id="uploadPreview" alt="Preview">
         </div>
 
-        <button class="btn-primary" id="btnAdicionar" onclick="adicionarProduto()">
+        <button class="btn-primary" id="btnAdicionar">
           <div class="spinner" id="btnSpinner"></div>
           <span id="btnText">Adicionar Produto</span>
         </button>
