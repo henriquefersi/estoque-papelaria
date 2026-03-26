@@ -282,7 +282,7 @@ window.fecharModalRemoverQtd = function () {
   fecharModal("modalRemoverQtd");
 };
 
-window.confirmarAjusteQtd = async function (tipo) {
+async function confirmarAjusteQtd(tipo) {
   const qtd = parseInt(document.getElementById("inputRemoverQtd").value);
 
   if (isNaN(qtd) || qtd < 1) {
@@ -295,15 +295,16 @@ window.confirmarAjusteQtd = async function (tipo) {
     return;
   }
 
-  const isAdd    = tipo === "add";
+  const isAdd     = tipo === "add";
   const spinnerId = isAdd ? "spinnerAjusteAdd" : "spinnerAjusteRem";
   const textoId   = isAdd ? "textoAjusteAdd"   : "textoAjusteRem";
-  const btnSel    = isAdd ? ".btn-ajuste-add"   : ".btn-ajuste-rem";
-  const btn       = document.querySelector(`#modalRemoverQtd ${btnSel}`);
+  const btnEl     = isAdd
+    ? document.getElementById("btnAjusteAdd")
+    : document.getElementById("btnAjusteRem");
   const spinner   = document.getElementById(spinnerId);
   const texto     = document.getElementById(textoId);
 
-  btn.disabled = true;
+  btnEl.disabled = true;
   spinner.classList.add("ativo");
   texto.textContent = isAdd ? "Adicionando..." : "Removendo...";
 
@@ -322,11 +323,18 @@ window.confirmarAjusteQtd = async function (tipo) {
     showToast("Erro ao atualizar", "❌");
     console.error(err);
   } finally {
-    btn.disabled = false;
+    btnEl.disabled = false;
     spinner.classList.remove("ativo");
     texto.textContent = isAdd ? "➕ Adicionar" : "➖ Remover";
   }
-};
+}
+
+document.getElementById("btnCancelarAjuste").addEventListener("click", () => fecharModal("modalRemoverQtd"));
+document.getElementById("btnAjusteAdd").addEventListener("click", () => confirmarAjusteQtd("add"));
+document.getElementById("btnAjusteRem").addEventListener("click", () => confirmarAjusteQtd("rem"));
+document.getElementById("inputRemoverQtd").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") confirmarAjusteQtd("add");
+});
 
 /* ════════════════════════════════════
    MODAL: EDITAR NOME
