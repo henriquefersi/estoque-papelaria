@@ -329,12 +329,6 @@ async function confirmarAjusteQtd(tipo) {
   }
 }
 
-document.getElementById("btnCancelarAjuste").addEventListener("click", () => fecharModal("modalRemoverQtd"));
-document.getElementById("btnAjusteAdd").addEventListener("click", () => confirmarAjusteQtd("add"));
-document.getElementById("btnAjusteRem").addEventListener("click", () => confirmarAjusteQtd("rem"));
-document.getElementById("inputRemoverQtd").addEventListener("keydown", (e) => {
-  if (e.key === "Enter") confirmarAjusteQtd("add");
-});
 
 /* ════════════════════════════════════
    MODAL: EDITAR NOME
@@ -398,16 +392,6 @@ function abrirModalFoto(src) {
 window.fecharModalFoto = function () {
   fecharModal("modalFoto");
 };
-
-// Fechar com ESC
-document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") {
-    fecharModal("modalFoto");
-    fecharModal("modalEditar");
-    fecharModal("modalRemoverQtd");
-    fecharModalBarcode();
-  }
-});
 
 /* ════════════════════════════════════
    REMOVER PRODUTO COMPLETO
@@ -553,6 +537,47 @@ document.getElementById("inputBarcode").addEventListener("keydown", (e) => {
 });
 
 /* ════════════════════════════════════
-   INIT
+   INIT — event listeners globais
 ════════════════════════════════════ */
+
+// Formulário
+document.getElementById("btnAdicionar").addEventListener("click", window.adicionarProduto);
+
+// Busca
+document.getElementById("campoBusca").addEventListener("input", window.filtrarProdutos);
+
+// Modal foto
+document.getElementById("modalFoto").addEventListener("click", () => fecharModal("modalFoto"));
+document.querySelector("#modalFoto .modal-foto-box").addEventListener("click", (e) => e.stopPropagation());
+document.getElementById("btnFecharFoto").addEventListener("click", () => fecharModal("modalFoto"));
+
+// Modal editar
+document.getElementById("btnCancelarEditar").addEventListener("click", () => fecharModal("modalEditar"));
+document.getElementById("btnSalvarEditar").addEventListener("click", window.salvarEdicao);
+
+// Modal ajuste quantidade
+document.getElementById("btnCancelarAjuste").addEventListener("click", () => fecharModal("modalRemoverQtd"));
+document.getElementById("btnAjusteAdd").addEventListener("click", () => confirmarAjusteQtd("add"));
+document.getElementById("btnAjusteRem").addEventListener("click", () => confirmarAjusteQtd("rem"));
+document.getElementById("inputRemoverQtd").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") confirmarAjusteQtd("add");
+});
+
+// Modal barcode
+document.getElementById("btnAbrirBarcode").addEventListener("click", window.abrirModalBarcode);
+document.getElementById("btnFecharBarcode").addEventListener("click", () => { pararScanner(); fecharModal("modalBarcode"); });
+document.getElementById("btnBuscarBarcode").addEventListener("click", window.buscarPorBarcode);
+document.getElementById("btnScan").addEventListener("click", window.alternarScanner);
+
+// ESC fecha qualquer modal
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    fecharModal("modalFoto");
+    fecharModal("modalEditar");
+    fecharModal("modalRemoverQtd");
+    pararScanner();
+    fecharModal("modalBarcode");
+  }
+});
+
 mostrarProdutos();
