@@ -19,6 +19,66 @@
   <!-- Toast -->
   <div class="toast" id="toast"></div>
 
+  <!-- Modal: Ampliar foto -->
+  <div class="modal-overlay" id="modalFoto" onclick="fecharModalFoto()">
+    <div class="modal-foto-box" onclick="event.stopPropagation()">
+      <img id="modalFotoImg" src="" alt="Foto do produto">
+      <button class="modal-fechar" onclick="fecharModalFoto()">✕</button>
+    </div>
+  </div>
+
+  <!-- Modal: Editar nome -->
+  <div class="modal-overlay" id="modalEditar">
+    <div class="modal-box">
+      <h3 class="modal-titulo">✏️ Editar Produto</h3>
+      <input type="text" id="inputEditarNome" placeholder="Novo nome do produto">
+      <div class="modal-acoes">
+        <button class="btn-modal-cancel" onclick="fecharModalEditar()">Cancelar</button>
+        <button class="btn-modal-confirm" onclick="salvarEdicao()">
+          <div class="spinner" id="spinnerEditar"></div>
+          <span id="textoSalvar">Salvar</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Remover quantidade -->
+  <div class="modal-overlay" id="modalRemoverQtd">
+    <div class="modal-box">
+      <h3 class="modal-titulo">➖ Remover Quantidade</h3>
+      <p class="modal-desc">Estoque atual: <strong id="modalRemoverAtual">0</strong></p>
+      <input type="number" id="inputRemoverQtd" placeholder="Quanto quer remover?" min="1">
+      <div class="modal-acoes">
+        <button class="btn-modal-cancel" onclick="fecharModalRemoverQtd()">Cancelar</button>
+        <button class="btn-modal-confirm btn-danger" onclick="confirmarRemoverQtd()">
+          <div class="spinner" id="spinnerRemoverQtd"></div>
+          <span id="textoRemoverQtd">Remover</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Código de barras -->
+  <div class="modal-overlay" id="modalBarcode">
+    <div class="modal-box">
+      <h3 class="modal-titulo">🔍 Buscar por Código de Barras</h3>
+      <p class="modal-desc">Digite ou escaneie o código do produto</p>
+      <div class="barcode-input-row">
+        <input type="text" id="inputBarcode" placeholder="Ex: 7891234567890" inputmode="numeric">
+        <button class="btn-scan" id="btnScan" onclick="alternarScanner()" title="Usar câmera">📷</button>
+      </div>
+      <div id="scannerArea" style="display:none">
+        <video id="scannerVideo" autoplay playsinline muted></video>
+        <p class="scan-hint">Aponte a câmera para o código de barras</p>
+      </div>
+      <div id="barcodeResultado" class="barcode-resultado" style="display:none"></div>
+      <div class="modal-acoes">
+        <button class="btn-modal-cancel" onclick="fecharModalBarcode()">Fechar</button>
+        <button class="btn-modal-confirm" onclick="buscarPorBarcode()">Buscar</button>
+      </div>
+    </div>
+  </div>
+
   <div class="container">
 
     <!-- Header -->
@@ -28,16 +88,34 @@
       <p class="subtitulo">Controle simples e prático dos seus produtos</p>
     </div>
 
+    <!-- Busca + Barcode -->
+    <div class="card busca-card">
+      <div class="busca-row">
+        <div class="busca-wrap">
+          <span class="busca-icon">🔎</span>
+          <input type="text" id="campoBusca" placeholder="Buscar produto..." oninput="filtrarProdutos()">
+        </div>
+        <button class="btn-barcode" onclick="abrirModalBarcode()" title="Buscar por código de barras">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <rect x="1" y="3" width="2" height="18" rx="0.5"/>
+            <rect x="5" y="3" width="1" height="18" rx="0.5"/>
+            <rect x="8" y="3" width="2" height="18" rx="0.5"/>
+            <rect x="12" y="3" width="1" height="18" rx="0.5"/>
+            <rect x="15" y="3" width="2" height="18" rx="0.5"/>
+            <rect x="19" y="3" width="1" height="18" rx="0.5"/>
+            <rect x="22" y="3" width="1" height="18" rx="0.5"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+
     <!-- Formulário -->
     <div class="card">
       <h2>Novo Produto</h2>
       <div class="formulario">
-
         <input type="text" id="nomeProduto" placeholder="Nome do produto">
-
         <input type="number" id="quantidadeProduto" placeholder="Quantidade inicial" min="1">
 
-        <!-- Upload de imagem -->
         <div class="upload-area" id="uploadArea">
           <input type="file" id="fileInput" accept="image/*">
           <div class="upload-placeholder">
@@ -54,7 +132,6 @@
           <div class="spinner" id="btnSpinner"></div>
           <span id="btnText">Adicionar Produto</span>
         </button>
-
       </div>
     </div>
 
