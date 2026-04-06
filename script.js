@@ -579,5 +579,3 @@ document.addEventListener("keydown", (e) => {
     fecharModal("modalBarcode");
   }
 });
-
-mostrarProdutos();
