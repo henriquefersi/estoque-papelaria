@@ -11,10 +11,6 @@ const lista      = document.getElementById("listaProdutos");
 const overlay    = document.getElementById("loadingOverlay");
 const toast      = document.getElementById("toast");
 
-/* ════════════════════════════════════
-   HELPERS DE UI
-════════════════════════════════════ */
-
 function showLoading(msg = "Carregando...") {
   document.getElementById("loadingMsg").textContent = msg;
   overlay.classList.add("ativo");
@@ -37,10 +33,6 @@ function abrirModal(id) {
 function fecharModal(id) {
   document.getElementById(id).classList.remove("ativo");
 }
-
-/* ════════════════════════════════════
-   UPLOAD DE IMAGEM (com compressão)
-════════════════════════════════════ */
 
 let imagemBase64 = "";
 
@@ -78,15 +70,7 @@ function resetUpload() {
   fileInput.value = "";
 }
 
-/* ════════════════════════════════════
-   CACHE DE PRODUTOS (para busca/barcode)
-════════════════════════════════════ */
-
 let todosProdutos = []; // { id, nome, quantidade, imagem, codigoBarras? }
-
-/* ════════════════════════════════════
-   LISTAR / FILTRAR PRODUTOS
-════════════════════════════════════ */
 
 async function mostrarProdutos() {
   showLoading("Buscando produtos...");
@@ -126,10 +110,15 @@ function renderizarLista(produtos) {
   }
 
   produtos.forEach((produto) => {
-    const quantidade  = Number(produto.quantidade) || 0;
-    const imagem      = produto.imagem || "https://placehold.co/52x52/1a1a24/8888aa?text=?";
+    const quantidade   = Number(produto.quantidade) || 0;
+    const imagem       = produto.imagem || "https://placehold.co/52x52/1a1a24/8888aa?text=?";
     const estoqueClass = quantidade <= 2 ? "estoque-baixo" : "";
     const estoqueLabel = quantidade <= 2 ? `⚠️ ${quantidade}` : quantidade;
+
+    // Tag de código de barras — só aparece se o produto tiver código cadastrado
+    const barcodeTag = produto.codigoBarras
+      ? `<span class="barcode-tag" title="Código de barras (clique para selecionar)">⬛ ${produto.codigoBarras}</span>`
+      : "";
 
     const li = document.createElement("li");
     li.className = "produto-item";
@@ -140,12 +129,13 @@ function renderizarLista(produtos) {
       <div class="produto-info">
         <span class="nome-produto">${produto.nome}</span>
         <span class="quantidade-produto ${estoqueClass}">Quantidade: ${estoqueLabel}</span>
+        ${barcodeTag}
       </div>
       <div class="acoes">
         <button class="btn-acao btn-mais"      title="Adicionar 1">+</button>
         <button class="btn-acao btn-menos"     title="Remover 1">−</button>
         <button class="btn-acao btn-minus-qtd" title="Remover quantidade">−N</button>
-        <button class="btn-acao btn-editar"    title="Editar nome">✏️</button>
+        <button class="btn-acao btn-editar"    title="Editar produto">✏️</button>
         <button class="btn-acao btn-remover"   title="Excluir produto">🗑</button>
       </div>
     `;
@@ -160,8 +150,10 @@ function renderizarLista(produtos) {
     li.querySelector(".btn-menos").addEventListener("click", () => diminuir(produto.id, quantidade));
     li.querySelector(".btn-minus-qtd").addEventListener("click", () => abrirModalRemoverQtd(produto.id, produto.nome, quantidade));
 
-    // Editar nome
-    li.querySelector(".btn-editar").addEventListener("click", () => abrirModalEditar(produto.id, produto.nome));
+    // Editar produto (nome + código de barras)
+    li.querySelector(".btn-editar").addEventListener("click", () =>
+      abrirModalEditar(produto.id, produto.nome, produto.codigoBarras || "")
+    );
 
     // Remover produto
     li.querySelector(".btn-remover").addEventListener("click", () => confirmarRemover(produto.id, produto.nome));
@@ -191,16 +183,12 @@ window.filtrarProdutos = function () {
   renderizarLista(filtrados);
 };
 
-/* ════════════════════════════════════
-   ADICIONAR PRODUTO
-════════════════════════════════════ */
-
 window.adicionarProduto = async function () {
-  const nome      = document.getElementById("nomeProduto").value.trim();
+  const nome       = document.getElementById("nomeProduto").value.trim();
   const quantidade = parseInt(document.getElementById("quantidadeProduto").value);
-  const btn       = document.getElementById("btnAdicionar");
-  const spinner   = document.getElementById("btnSpinner");
-  const btnText   = document.getElementById("btnText");
+  const btn        = document.getElementById("btnAdicionar");
+  const spinner    = document.getElementById("btnSpinner");
+  const btnText    = document.getElementById("btnText");
 
   if (!nome || isNaN(quantidade) || quantidade < 1) {
     showToast("Preencha o nome e a quantidade corretamente", "⚠️");
@@ -218,7 +206,7 @@ window.adicionarProduto = async function () {
       imagem: imagemBase64 || ""
     });
 
-    document.getElementById("nomeProduto").value    = "";
+    document.getElementById("nomeProduto").value       = "";
     document.getElementById("quantidadeProduto").value = "";
     resetUpload();
     showToast(`"${nome}" adicionado ao estoque!`);
@@ -233,10 +221,6 @@ window.adicionarProduto = async function () {
     btnText.textContent = "Adicionar Produto";
   }
 };
-
-/* ════════════════════════════════════
-   AUMENTAR / DIMINUIR 1
-════════════════════════════════════ */
 
 async function aumentar(id, quantidade) {
   showLoading("Atualizando...");
@@ -261,13 +245,9 @@ async function diminuir(id, quantidade) {
   }
 }
 
-/* ════════════════════════════════════
-   MODAL: REMOVER QUANTIDADE
-════════════════════════════════════ */
-
-let _removerQtdId       = null;
-let _removerQtdNome     = "";
-let _removerQtdAtual    = 0;
+let _removerQtdId    = null;
+let _removerQtdNome  = "";
+let _removerQtdAtual = 0;
 
 function abrirModalRemoverQtd(id, nome, qtdAtual) {
   _removerQtdId    = id;
@@ -329,26 +309,26 @@ async function confirmarAjusteQtd(tipo) {
   }
 }
 
-
-/* ════════════════════════════════════
-   MODAL: EDITAR NOME
-════════════════════════════════════ */
-
 let _editarId = null;
 
-function abrirModalEditar(id, nomeAtual) {
+function abrirModalEditar(id, nomeAtual, barcodeAtual = "") {
   _editarId = id;
-  document.getElementById("inputEditarNome").value = nomeAtual;
+  document.getElementById("inputEditarNome").value    = nomeAtual;
+  document.getElementById("inputEditarBarcode").value = barcodeAtual;
+  pararScannerEditar(); // garante que scanner anterior foi encerrado
   abrirModal("modalEditar");
   setTimeout(() => document.getElementById("inputEditarNome").focus(), 100);
 }
 
 window.fecharModalEditar = function () {
+  pararScannerEditar();
   fecharModal("modalEditar");
 };
 
 window.salvarEdicao = async function () {
-  const novoNome = document.getElementById("inputEditarNome").value.trim();
+  const novoNome    = document.getElementById("inputEditarNome").value.trim();
+  const novoBarcode = document.getElementById("inputEditarBarcode").value.trim();
+
   if (!novoNome) { showToast("Digite um nome válido", "⚠️"); return; }
 
   const btn     = document.querySelector("#modalEditar .btn-modal-confirm");
@@ -359,10 +339,15 @@ window.salvarEdicao = async function () {
   spinner.classList.add("ativo");
   texto.textContent = "Salvando...";
 
+  pararScannerEditar();
+
   try {
-    await updateDoc(doc(window.db, "produtos", _editarId), { nome: novoNome });
+    await updateDoc(doc(window.db, "produtos", _editarId), {
+      nome: novoNome,
+      codigoBarras: novoBarcode
+    });
     fecharModal("modalEditar");
-    showToast(`Nome atualizado para "${novoNome}"`);
+    showToast(`"${novoNome}" atualizado!`);
     await mostrarProdutos();
   } catch (err) {
     showToast("Erro ao salvar", "❌");
@@ -378,10 +363,9 @@ window.salvarEdicao = async function () {
 document.getElementById("inputEditarNome").addEventListener("keydown", (e) => {
   if (e.key === "Enter") window.salvarEdicao();
 });
-
-/* ════════════════════════════════════
-   MODAL: AMPLIAR FOTO
-════════════════════════════════════ */
+document.getElementById("inputEditarBarcode").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") window.salvarEdicao();
+});
 
 function abrirModalFoto(src) {
   if (!src || src.includes("placehold.co")) return;
@@ -392,10 +376,6 @@ function abrirModalFoto(src) {
 window.fecharModalFoto = function () {
   fecharModal("modalFoto");
 };
-
-/* ════════════════════════════════════
-   REMOVER PRODUTO COMPLETO
-════════════════════════════════════ */
 
 function confirmarRemover(id, nome) {
   if (confirm(`Excluir "${nome}" do estoque?`)) remover(id, nome);
@@ -412,10 +392,6 @@ async function remover(id, nome) {
     hideLoading();
   }
 }
-
-/* ════════════════════════════════════
-   MODAL: CÓDIGO DE BARRAS
-════════════════════════════════════ */
 
 let scannerStream   = null;
 let scannerInterval = null;
@@ -447,7 +423,6 @@ function _buscarNaLista(codigo) {
   const resultado = document.getElementById("barcodeResultado");
   resultado.style.display = "block";
 
-  // Busca pelo campo codigoBarras ou pelo nome que contenha o código
   const encontrado = todosProdutos.find(p =>
     (p.codigoBarras && p.codigoBarras === codigo) ||
     (p.nome && p.nome.toLowerCase().includes(codigo.toLowerCase()))
@@ -466,13 +441,10 @@ function _buscarNaLista(codigo) {
   }
 }
 
-/* ── Scanner de câmera (BarcodeDetector nativo ou fallback) ── */
+/* ── Scanner de câmera — modal de busca ── */
 
 window.alternarScanner = async function () {
-  if (scannerAtivo) {
-    pararScanner();
-    return;
-  }
+  if (scannerAtivo) { pararScanner(); return; }
   await iniciarScanner();
 };
 
@@ -490,7 +462,6 @@ async function iniciarScanner() {
     btn.classList.add("ativo");
     scannerAtivo = true;
 
-    // Tenta usar BarcodeDetector nativo (Chrome/Android)
     if ("BarcodeDetector" in window) {
       const detector = new BarcodeDetector({ formats: ["ean_13","ean_8","code_128","code_39","qr_code","upc_a","upc_e"] });
       scannerInterval = setInterval(async () => {
@@ -506,7 +477,6 @@ async function iniciarScanner() {
         } catch (_) {}
       }, 500);
     } else {
-      // Fallback: avisa que o navegador não suporta scan automático
       document.querySelector(".scan-hint").textContent =
         "Câmera ativa. Se seu navegador não detectar automaticamente, use o campo acima para digitar o código.";
     }
@@ -531,19 +501,80 @@ function pararScanner() {
   scannerAtivo = false;
 }
 
-/* ── Enter para buscar código manualmente ── */
+let scannerStreamEditar   = null;
+let scannerIntervalEditar = null;
+let scannerAtivoEditar    = false;
+
+window.alternarScannerEditar = async function () {
+  if (scannerAtivoEditar) { pararScannerEditar(); return; }
+  await iniciarScannerEditar();
+};
+
+async function iniciarScannerEditar() {
+  const area  = document.getElementById("scannerAreaEditar");
+  const video = document.getElementById("scannerVideoEditar");
+  const btn   = document.getElementById("btnScanEditar");
+
+  try {
+    scannerStreamEditar = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "environment" }
+    });
+    video.srcObject = scannerStreamEditar;
+    area.style.display = "block";
+    btn.classList.add("ativo");
+    scannerAtivoEditar = true;
+
+    if ("BarcodeDetector" in window) {
+      const detector = new BarcodeDetector({
+        formats: ["ean_13","ean_8","code_128","code_39","qr_code","upc_a","upc_e"]
+      });
+      scannerIntervalEditar = setInterval(async () => {
+        if (video.readyState !== video.HAVE_ENOUGH_DATA) return;
+        try {
+          const barcodes = await detector.detect(video);
+          if (barcodes.length > 0) {
+            document.getElementById("inputEditarBarcode").value = barcodes[0].rawValue;
+            showToast("Código capturado!", "✅");
+            pararScannerEditar();
+          }
+        } catch (_) {}
+      }, 500);
+    } else {
+      // Navegador sem BarcodeDetector — câmera abre mas sem detecção automática
+      const hint = area.querySelector(".scan-hint");
+      if (hint) hint.textContent = "Câmera ativa. Digite o código no campo acima caso não seja detectado automaticamente.";
+    }
+  } catch (err) {
+    showToast("Não foi possível acessar a câmera", "❌");
+    console.error(err);
+  }
+}
+
+function pararScannerEditar() {
+  clearInterval(scannerIntervalEditar);
+  scannerIntervalEditar = null;
+
+  if (scannerStreamEditar) {
+    scannerStreamEditar.getTracks().forEach(t => t.stop());
+    scannerStreamEditar = null;
+  }
+
+  const area = document.getElementById("scannerAreaEditar");
+  if (area) area.style.display = "none";
+  const btn = document.getElementById("btnScanEditar");
+  if (btn) btn.classList.remove("ativo");
+  scannerAtivoEditar = false;
+}
+
+/* ── Enter para buscar código manualmente (modal busca) ── */
 document.getElementById("inputBarcode").addEventListener("keydown", (e) => {
   if (e.key === "Enter") window.buscarPorBarcode();
 });
 
-/* ════════════════════════════════════
-   INIT — event listeners globais
-════════════════════════════════════ */
-
 // Formulário
 document.getElementById("btnAdicionar").addEventListener("click", window.adicionarProduto);
 
-// Busca
+// Busca por texto
 document.getElementById("campoBusca").addEventListener("input", window.filtrarProdutos);
 
 // Modal foto
@@ -552,8 +583,12 @@ document.querySelector("#modalFoto .modal-foto-box").addEventListener("click", (
 document.getElementById("btnFecharFoto").addEventListener("click", () => fecharModal("modalFoto"));
 
 // Modal editar
-document.getElementById("btnCancelarEditar").addEventListener("click", () => fecharModal("modalEditar"));
+document.getElementById("btnCancelarEditar").addEventListener("click", () => {
+  pararScannerEditar();
+  fecharModal("modalEditar");
+});
 document.getElementById("btnSalvarEditar").addEventListener("click", window.salvarEdicao);
+document.getElementById("btnScanEditar").addEventListener("click", window.alternarScannerEditar);
 
 // Modal ajuste quantidade
 document.getElementById("btnCancelarAjuste").addEventListener("click", () => fecharModal("modalRemoverQtd"));
@@ -563,7 +598,7 @@ document.getElementById("inputRemoverQtd").addEventListener("keydown", (e) => {
   if (e.key === "Enter") confirmarAjusteQtd("add");
 });
 
-// Modal barcode
+// Modal barcode (busca)
 document.getElementById("btnAbrirBarcode").addEventListener("click", window.abrirModalBarcode);
 document.getElementById("btnFecharBarcode").addEventListener("click", () => { pararScanner(); fecharModal("modalBarcode"); });
 document.getElementById("btnBuscarBarcode").addEventListener("click", window.buscarPorBarcode);
@@ -573,6 +608,7 @@ document.getElementById("btnScan").addEventListener("click", window.alternarScan
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
     fecharModal("modalFoto");
+    pararScannerEditar();
     fecharModal("modalEditar");
     fecharModal("modalRemoverQtd");
     pararScanner();

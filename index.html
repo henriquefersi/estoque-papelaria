@@ -27,11 +27,25 @@
     </div>
   </div>
 
-  <!-- Modal: Editar nome -->
+  <!-- Modal: Editar produto (nome + código de barras) -->
   <div class="modal-overlay" id="modalEditar">
     <div class="modal-box">
       <h3 class="modal-titulo">✏️ Editar Produto</h3>
       <input type="text" id="inputEditarNome" placeholder="Novo nome do produto">
+
+      <div class="barcode-input-row">
+        <input type="text" id="inputEditarBarcode"
+               placeholder="Código de barras (opcional)"
+               inputmode="numeric">
+        <button class="btn-scan" id="btnScanEditar" title="Usar câmera">📷</button>
+      </div>
+
+      <div id="scannerAreaEditar" style="display:none">
+        <video id="scannerVideoEditar" autoplay playsinline muted
+               style="width:100%;border-radius:10px;margin-top:4px;max-height:200px;object-fit:cover;background:#000"></video>
+        <p class="scan-hint">Aponte a câmera para o código de barras</p>
+      </div>
+
       <div class="modal-acoes">
         <button class="btn-modal-cancel" id="btnCancelarEditar">Cancelar</button>
         <button class="btn-modal-confirm" id="btnSalvarEditar">
@@ -62,7 +76,7 @@
     </div>
   </div>
 
-  <!-- Modal: Código de barras -->
+  <!-- Modal: Código de barras (busca) -->
   <div class="modal-overlay" id="modalBarcode">
     <div class="modal-box">
       <h3 class="modal-titulo">🔍 Buscar por Código de Barras</h3>
