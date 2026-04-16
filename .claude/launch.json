@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "Estoque Papelaria (servidor estático)",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["serve", ".", "--listen", "3000", "--no-clipboard"],
+      "port": 3000
+    }
+  ]
+}

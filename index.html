@@ -5,6 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Estoque da Papelaria</title>
   <link rel="stylesheet" href="estilo.css">
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#7c6af7">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Estoque">
+  <link rel="apple-touch-icon" href="icons/icon-192x192.png">
 </head>
 <body>
 
@@ -222,6 +229,48 @@
   </script>
 
   <script src="script.js" type="module"></script>
+
+  <!-- Botão de instalar PWA -->
+  <div id="pwaInstallBar" style="display:none; position:fixed; bottom:80px; left:50%; transform:translateX(-50%); z-index:1200; animation:fadeUp 0.4s ease both;">
+    <button id="btnInstalarPWA" style="
+      display: flex; align-items: center; gap: 10px;
+      padding: 12px 22px;
+      background: linear-gradient(135deg, #7c6af7, #c084fc);
+      border: none; border-radius: 100px; color: white;
+      font-family: 'DM Sans', sans-serif; font-size: 14px; font-weight: 700;
+      cursor: pointer; box-shadow: 0 8px 24px rgba(124,106,247,0.45); white-space: nowrap;
+    ">📲 Instalar app na área de trabalho</button>
+  </div>
+
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./service-worker.js');
+      });
+    }
+
+    let deferredPrompt = null;
+    const installBar = document.getElementById('pwaInstallBar');
+    const btnInstalar = document.getElementById('btnInstalarPWA');
+
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      deferredPrompt = e;
+      installBar.style.display = 'block';
+    });
+
+    btnInstalar.addEventListener('click', async () => {
+      if (!deferredPrompt) return;
+      deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      if (outcome === 'accepted') installBar.style.display = 'none';
+      deferredPrompt = null;
+    });
+
+    window.addEventListener('appinstalled', () => {
+      installBar.style.display = 'none';
+    });
+  </script>
 
 </body>
 </html>
