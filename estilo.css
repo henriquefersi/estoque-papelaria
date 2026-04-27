@@ -141,24 +141,43 @@ h1 {
   padding-left: 40px !important;
 }
 
-.btn-barcode {
-  width: 48px;
-  height: 48px;
-  flex-shrink: 0;
-  background: var(--surface2);
+/* ── BOTÃO CÂMERA INTEGRADO NA BUSCA ── */
+.busca-wrap {
+  position: relative;
+}
+
+.busca-wrap input {
+  padding-right: 48px !important;
+}
+
+.btn-busca-cam {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 34px;
+  height: 34px;
+  background: transparent;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 8px;
   color: var(--text-muted);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: border-color 0.2s, color 0.2s;
+  transition: border-color 0.2s, color 0.2s, background 0.2s;
+  flex-shrink: 0;
 }
 
-.btn-barcode:hover {
+.btn-busca-cam:hover {
   border-color: var(--accent);
   color: var(--accent);
+}
+
+.btn-busca-cam.ativo {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(124,106,247,0.1);
 }
 
 /* ── FORMULÁRIO ── */

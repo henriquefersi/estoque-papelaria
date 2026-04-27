@@ -83,27 +83,6 @@
     </div>
   </div>
 
-  <!-- Modal: Código de barras (busca) -->
-  <div class="modal-overlay" id="modalBarcode">
-    <div class="modal-box">
-      <h3 class="modal-titulo">🔍 Buscar por Código de Barras</h3>
-      <p class="modal-desc">Digite ou escaneie o código do produto</p>
-      <div class="barcode-input-row">
-        <input type="text" id="inputBarcode" placeholder="Ex: 7891234567890" inputmode="numeric">
-        <button class="btn-scan" id="btnScan" title="Usar câmera">📷</button>
-      </div>
-      <div id="scannerArea" style="display:none">
-        <video id="scannerVideo" autoplay playsinline muted></video>
-        <p class="scan-hint">Aponte a câmera para o código de barras</p>
-      </div>
-      <div id="barcodeResultado" class="barcode-resultado" style="display:none"></div>
-      <div class="modal-acoes">
-        <button class="btn-modal-cancel" id="btnFecharBarcode">Fechar</button>
-        <button class="btn-modal-confirm" id="btnBuscarBarcode">Buscar</button>
-      </div>
-    </div>
-  </div>
-
   <div class="container">
 
     <!-- Header -->
@@ -125,24 +104,30 @@
       ">Sair 🚪</button>
     </div>
 
-    <!-- Busca + Barcode -->
+    <!-- Busca integrada com câmera -->
     <div class="card busca-card">
       <div class="busca-row">
         <div class="busca-wrap">
           <span class="busca-icon">🔎</span>
-          <input type="text" id="campoBusca" placeholder="Buscar produto...">
+          <input type="text" id="campoBusca" placeholder="Buscar produto ou código de barras...">
+          <button class="btn-busca-cam" id="btnBuscaCam" title="Escanear código de barras">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <rect x="1" y="3" width="2" height="18" rx="0.5"/>
+              <rect x="5" y="3" width="1" height="18" rx="0.5"/>
+              <rect x="8" y="3" width="2" height="18" rx="0.5"/>
+              <rect x="12" y="3" width="1" height="18" rx="0.5"/>
+              <rect x="15" y="3" width="2" height="18" rx="0.5"/>
+              <rect x="19" y="3" width="1" height="18" rx="0.5"/>
+              <rect x="22" y="3" width="1" height="18" rx="0.5"/>
+            </svg>
+          </button>
         </div>
-        <button class="btn-barcode" id="btnAbrirBarcode" title="Buscar por código de barras">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-            <rect x="1" y="3" width="2" height="18" rx="0.5"/>
-            <rect x="5" y="3" width="1" height="18" rx="0.5"/>
-            <rect x="8" y="3" width="2" height="18" rx="0.5"/>
-            <rect x="12" y="3" width="1" height="18" rx="0.5"/>
-            <rect x="15" y="3" width="2" height="18" rx="0.5"/>
-            <rect x="19" y="3" width="1" height="18" rx="0.5"/>
-            <rect x="22" y="3" width="1" height="18" rx="0.5"/>
-          </svg>
-        </button>
+      </div>
+      <!-- Scanner inline na busca principal -->
+      <div id="scannerAreaBusca" style="display:none; margin-top:12px;">
+        <video id="scannerVideoBusca" autoplay playsinline muted
+               style="width:100%;border-radius:10px;max-height:220px;object-fit:cover;background:#000"></video>
+        <p class="scan-hint">Aponte a câmera para o código de barras</p>
       </div>
     </div>
 

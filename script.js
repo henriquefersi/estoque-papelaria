@@ -21,7 +21,8 @@ const estado = {
   imagemCarregando: false,
   produtoAtual:     { id: null, nome: "", qtd: 0 },
   editarId:         null,
-  scanner:          { stream: null, interval: null, ativo: false },
+  termoBusca:       "",          // mantém o filtro ativo após alterações
+  scannerBusca:     { stream: null, interval: null, ativo: false },
   scannerEditar:    { stream: null, interval: null, ativo: false }
 };
 
@@ -108,7 +109,6 @@ function resetUpload() {
 // ── Produtos ─────────────────────────────────────────────────────
 async function mostrarProdutos() {
   showLoading("Buscando produtos...");
-  lista.innerHTML = "";
 
   try {
     const querySnapshot = await getDocs(collection(window.db, "produtos"));
@@ -116,7 +116,16 @@ async function mostrarProdutos() {
     querySnapshot.forEach((documento) => {
       estado.todosProdutos.push({ id: documento.id, ...documento.data() });
     });
-    renderizarLista(estado.todosProdutos);
+    // Reaplicar o filtro ativo (mantém a busca após alterações)
+    if (estado.termoBusca) {
+      const termo = estado.termoBusca.toLowerCase();
+      renderizarLista(estado.todosProdutos.filter(p =>
+        p.nome.toLowerCase().includes(termo) ||
+        (p.codigoBarras && p.codigoBarras.includes(termo))
+      ));
+    } else {
+      renderizarLista(estado.todosProdutos);
+    }
   } catch (err) {
     showToast("Erro ao carregar produtos", "❌");
     console.error(err);
@@ -200,8 +209,12 @@ window.mostrarProdutos = mostrarProdutos;
 
 window.filtrarProdutos = function () {
   const termo = document.getElementById("campoBusca").value.trim().toLowerCase();
+  estado.termoBusca = termo;
   if (!termo) { renderizarLista(estado.todosProdutos); return; }
-  renderizarLista(estado.todosProdutos.filter(p => p.nome.toLowerCase().includes(termo)));
+  renderizarLista(estado.todosProdutos.filter(p =>
+    p.nome.toLowerCase().includes(termo) ||
+    (p.codigoBarras && p.codigoBarras.includes(termo))
+  ));
 };
 
 window.adicionarProduto = async function () {
@@ -473,61 +486,24 @@ function pararScannerGenerico(scannerState, areaId, btnId) {
   scannerState.ativo = false;
 }
 
-// ── Modal Barcode (busca) ─────────────────────────────────────────
-window.abrirModalBarcode = function () {
-  document.getElementById("inputBarcode").value             = "";
-  document.getElementById("barcodeResultado").style.display = "none";
-  document.getElementById("barcodeResultado").className     = "barcode-resultado";
-  document.getElementById("scannerArea").style.display      = "none";
-  document.getElementById("btnScan").classList.remove("ativo");
-  abrirModal("modalBarcode");
-  setTimeout(() => document.getElementById("inputBarcode").focus(), 100);
-};
-
-window.fecharModalBarcode = function () {
-  pararScannerGenerico(estado.scanner, "scannerArea", "btnScan");
-  fecharModal("modalBarcode");
-};
-
-window.buscarPorBarcode = function () {
-  const codigo = document.getElementById("inputBarcode").value.trim();
-  if (!codigo) { showToast("Digite o código de barras", "⚠️"); return; }
-  _buscarNaLista(codigo);
-};
-
-function _buscarNaLista(codigo) {
-  const resultado        = document.getElementById("barcodeResultado");
-  resultado.style.display = "block";
-
-  const encontrado = estado.todosProdutos.find(
-    p => p.codigoBarras && p.codigoBarras === codigo
-  );
-
-  if (encontrado) {
-    const qtd = Number(encontrado.quantidade) || 0;
-    resultado.className = "barcode-resultado encontrado";
-    resultado.innerHTML = `
-      <div class="barcode-prod-nome">✅ ${encontrado.nome}</div>
-      <div class="barcode-prod-qtd">Quantidade em estoque: ${qtd}</div>
-    `;
-  } else {
-    resultado.className = "barcode-resultado nao-encontrado";
-    resultado.innerHTML = `<div>❌ Produto com código <strong>${codigo}</strong> não encontrado no estoque.</div>`;
-  }
-}
-
-window.alternarScanner = async function () {
-  if (estado.scanner.ativo) {
-    pararScannerGenerico(estado.scanner, "scannerArea", "btnScan");
+// ── Scanner integrado na busca principal ─────────────────────────
+window.alternarScannerBusca = async function () {
+  if (estado.scannerBusca.ativo) {
+    pararScannerGenerico(estado.scannerBusca, "scannerAreaBusca", "btnBuscaCam");
     return;
   }
-  await iniciarScannerGenerico(estado.scanner, {
-    areaId:  "scannerArea",
-    videoId: "scannerVideo",
-    btnId:   "btnScan",
+  await iniciarScannerGenerico(estado.scannerBusca, {
+    areaId:  "scannerAreaBusca",
+    videoId: "scannerVideoBusca",
+    btnId:   "btnBuscaCam",
     onDetect: (codigo) => {
-      document.getElementById("inputBarcode").value = codigo;
-      _buscarNaLista(codigo);
+      const campo = document.getElementById("campoBusca");
+      campo.value = codigo;
+      estado.termoBusca = codigo.toLowerCase();
+      renderizarLista(estado.todosProdutos.filter(p =>
+        p.codigoBarras && p.codigoBarras.includes(codigo)
+      ));
+      showToast("Código escaneado!", "✅");
     }
   });
 };
@@ -549,12 +525,9 @@ window.alternarScannerEditar = async function () {
 };
 
 // ── Event Listeners ───────────────────────────────────────────────
-document.getElementById("inputBarcode").addEventListener("keydown", (e) => {
-  if (e.key === "Enter") window.buscarPorBarcode();
-});
-
 document.getElementById("btnAdicionar").addEventListener("click", window.adicionarProduto);
 document.getElementById("campoBusca").addEventListener("input", window.filtrarProdutos);
+document.getElementById("btnBuscaCam").addEventListener("click", window.alternarScannerBusca);
 
 document.getElementById("modalFoto").addEventListener("click", () => fecharModal("modalFoto"));
 document.querySelector("#modalFoto .modal-foto-box").addEventListener("click", (e) => e.stopPropagation());
@@ -574,21 +547,12 @@ document.getElementById("inputRemoverQtd").addEventListener("keydown", (e) => {
   if (e.key === "Enter") confirmarAjusteQtd("add");
 });
 
-document.getElementById("btnAbrirBarcode").addEventListener("click", window.abrirModalBarcode);
-document.getElementById("btnFecharBarcode").addEventListener("click", () => {
-  pararScannerGenerico(estado.scanner, "scannerArea", "btnScan");
-  fecharModal("modalBarcode");
-});
-document.getElementById("btnBuscarBarcode").addEventListener("click", window.buscarPorBarcode);
-document.getElementById("btnScan").addEventListener("click", window.alternarScanner);
-
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
     fecharModal("modalFoto");
     pararScannerGenerico(estado.scannerEditar, "scannerAreaEditar", "btnScanEditar");
     fecharModal("modalEditar");
     fecharModal("modalRemoverQtd");
-    pararScannerGenerico(estado.scanner, "scannerArea", "btnScan");
-    fecharModal("modalBarcode");
+    pararScannerGenerico(estado.scannerBusca, "scannerAreaBusca", "btnBuscaCam");
   }
 });
