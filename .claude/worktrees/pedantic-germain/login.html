@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Login — Estoque da Papelaria</title>
+  <link rel="stylesheet" href="estilo.css">
+  <style>
+    .login-container {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .login-box {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 36px 28px;
+      width: 100%;
+      max-width: 380px;
+      box-shadow: var(--shadow);
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .login-header { text-align: center; margin-bottom: 8px; }
+    .login-header .header-badge { margin-bottom: 12px; }
+    .login-header h1 { font-size: 28px; margin-bottom: 6px; }
+    .login-header p { color: var(--text-muted); font-size: 14px; }
+    .erro-login {
+      background: rgba(248,113,113,0.1);
+      border: 1px solid rgba(248,113,113,0.3);
+      border-radius: 10px;
+      padding: 10px 14px;
+      font-size: 13px;
+      color: var(--red);
+      display: none;
+    }
+    .erro-login.ativo { display: block; }
+  </style>
+</head>
+<body>
+  <div class="login-container">
+    <div class="login-box">
+      <div class="login-header">
+        <div class="header-badge">📎 Papelaria</div>
+        <h1>Estoque</h1>
+        <p>Digite a senha para acessar</p>
+      </div>
+
+      <div class="erro-login" id="erroLogin">Senha incorreta.</div>
+
+      <input type="password" id="inputSenha" placeholder="Senha de acesso">
+
+      <button class="btn-primary" id="btnLogin">
+        <div class="spinner" id="spinnerLogin"></div>
+        <span id="textoLogin">Entrar</span>
+      </button>
+    </div>
+  </div>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-app.js";
+    import { getAuth, signInWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-auth.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyBnFxoOAIn_k1_kWiW0rv7uD2SWsgQytxM",
+      authDomain: "estoque-papelaria.firebaseapp.com",
+      projectId: "estoque-papelaria",
+      storageBucket: "estoque-papelaria.firebasestorage.app",
+      messagingSenderId: "406503306850",
+      appId: "1:406503306850:web:f6c86c32c328fd896f033b"
+    };
+
+    const app  = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+
+    const btnLogin  = document.getElementById("btnLogin");
+    const spinner   = document.getElementById("spinnerLogin");
+    const texto     = document.getElementById("textoLogin");
+    const erroLogin = document.getElementById("erroLogin");
+
+    // E-mail fixo, o usuário só digita a senha
+    const EMAIL_FIXO = "equipe@papelaria.com";
+
+    async function fazerLogin() {
+      const senha = document.getElementById("inputSenha").value;
+
+      if (!senha) {
+        erroLogin.textContent = "Digite a senha.";
+        erroLogin.classList.add("ativo");
+        return;
+      }
+
+      btnLogin.disabled = true;
+      spinner.classList.add("ativo");
+      texto.textContent = "Entrando...";
+      erroLogin.classList.remove("ativo");
+
+      try {
+        await signInWithEmailAndPassword(auth, EMAIL_FIXO, senha);
+        window.location.href = "index.html";
+      } catch (err) {
+        erroLogin.textContent = "Senha incorreta.";
+        erroLogin.classList.add("ativo");
+      } finally {
+        btnLogin.disabled = false;
+        spinner.classList.remove("ativo");
+        texto.textContent = "Entrar";
+      }
+    }
+
+    btnLogin.addEventListener("click", fazerLogin);
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") fazerLogin();
+    });
+  </script>
+</body>
+</html>
