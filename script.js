@@ -527,6 +527,13 @@ window.alternarScannerEditar = async function () {
 // ── Event Listeners ───────────────────────────────────────────────
 document.getElementById("btnAdicionar").addEventListener("click", window.adicionarProduto);
 document.getElementById("campoBusca").addEventListener("input", window.filtrarProdutos);
+document.getElementById("campoBusca").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    window.filtrarProdutos();
+    e.target.blur(); // esconde o teclado no celular
+  }
+});
 document.getElementById("btnBuscaCam").addEventListener("click", window.alternarScannerBusca);
 
 document.getElementById("modalFoto").addEventListener("click", () => fecharModal("modalFoto"));
