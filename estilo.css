@@ -784,3 +784,8 @@ ul { list-style: none; padding: 0; }
   .btn-acao { width: 36px; height: 36px; font-size: 14px; }
   .nome-produto { font-size: 14px; }
 }
+
+/* Campo com botão de câmera (sem ícone à esquerda) */
+.campo-com-cam input {
+  padding-left: 16px !important;
+}
