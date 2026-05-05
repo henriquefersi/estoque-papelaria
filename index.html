@@ -138,6 +138,26 @@
         <input type="text" id="nomeProduto" placeholder="Nome do produto">
         <input type="number" id="quantidadeProduto" placeholder="Quantidade inicial" min="1">
 
+        <div class="busca-wrap">
+          <input type="text" id="codigoBarrasProduto" placeholder="Código de barras" inputmode="numeric">
+          <button class="btn-busca-cam" id="btnScanAdd" title="Escanear código de barras" type="button">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <rect x="1" y="3" width="2" height="18" rx="0.5"/>
+              <rect x="5" y="3" width="1" height="18" rx="0.5"/>
+              <rect x="8" y="3" width="2" height="18" rx="0.5"/>
+              <rect x="12" y="3" width="1" height="18" rx="0.5"/>
+              <rect x="15" y="3" width="2" height="18" rx="0.5"/>
+              <rect x="19" y="3" width="1" height="18" rx="0.5"/>
+              <rect x="22" y="3" width="1" height="18" rx="0.5"/>
+            </svg>
+          </button>
+        </div>
+        <div id="scannerAreaAdd" style="display:none;">
+          <video id="scannerVideoAdd" autoplay playsinline muted
+                 style="width:100%;border-radius:10px;max-height:220px;object-fit:cover;background:#000"></video>
+          <p class="scan-hint">Aponte a câmera para o código de barras</p>
+        </div>
+
         <div class="upload-area" id="uploadArea">
           <input type="file" id="fileInput" accept="image/*">
           <div class="upload-placeholder">

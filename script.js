@@ -23,7 +23,8 @@ const estado = {
   editarId:         null,
   termoBusca:       "",          // mantém o filtro ativo após alterações
   scannerBusca:     { stream: null, interval: null, ativo: false },
-  scannerEditar:    { stream: null, interval: null, ativo: false }
+  scannerEditar:    { stream: null, interval: null, ativo: false },
+  scannerAdd:       { stream: null, interval: null, ativo: false }
 };
 
 // ── Elementos do DOM ─────────────────────────────────────────────
@@ -218,11 +219,12 @@ window.filtrarProdutos = function () {
 };
 
 window.adicionarProduto = async function () {
-  const nome       = document.getElementById("nomeProduto").value.trim();
-  const quantidade = parseInt(document.getElementById("quantidadeProduto").value);
-  const btn        = document.getElementById("btnAdicionar");
-  const spinner    = document.getElementById("btnSpinner");
-  const btnText    = document.getElementById("btnText");
+  const nome         = document.getElementById("nomeProduto").value.trim();
+  const quantidade   = parseInt(document.getElementById("quantidadeProduto").value);
+  const codigoBarras = document.getElementById("codigoBarrasProduto").value.trim();
+  const btn          = document.getElementById("btnAdicionar");
+  const spinner      = document.getElementById("btnSpinner");
+  const btnText      = document.getElementById("btnText");
 
   if (!nome || isNaN(quantidade) || quantidade < 1) {
     showToast("Preencha o nome e a quantidade corretamente", "⚠️");
@@ -242,6 +244,16 @@ window.adicionarProduto = async function () {
     return;
   }
 
+  if (codigoBarras) {
+    const dupCodigo = estado.todosProdutos.find(
+      p => p.codigoBarras && p.codigoBarras === codigoBarras
+    );
+    if (dupCodigo) {
+      showToast(`Código de barras já cadastrado em "${dupCodigo.nome}"`, "⚠️");
+      return;
+    }
+  }
+
   btn.disabled = true;
   spinner.classList.add("ativo");
   btnText.textContent = "Adicionando...";
@@ -250,11 +262,14 @@ window.adicionarProduto = async function () {
     await addDoc(collection(window.db, "produtos"), {
       nome,
       quantidade,
-      imagem: estado.imagemBase64 || ""
+      imagem: estado.imagemBase64 || "",
+      codigoBarras: codigoBarras || ""
     });
 
-    document.getElementById("nomeProduto").value       = "";
-    document.getElementById("quantidadeProduto").value = "";
+    document.getElementById("nomeProduto").value         = "";
+    document.getElementById("quantidadeProduto").value   = "";
+    document.getElementById("codigoBarrasProduto").value = "";
+    pararScannerGenerico(estado.scannerAdd, "scannerAreaAdd", "btnScanAdd");
     resetUpload();
     showToast(`"${nome}" adicionado ao estoque!`);
     await mostrarProdutos();
@@ -524,9 +539,32 @@ window.alternarScannerEditar = async function () {
   });
 };
 
+window.alternarScannerAdd = async function () {
+  if (estado.scannerAdd.ativo) {
+    pararScannerGenerico(estado.scannerAdd, "scannerAreaAdd", "btnScanAdd");
+    return;
+  }
+  await iniciarScannerGenerico(estado.scannerAdd, {
+    areaId:  "scannerAreaAdd",
+    videoId: "scannerVideoAdd",
+    btnId:   "btnScanAdd",
+    onDetect: (codigo) => {
+      document.getElementById("codigoBarrasProduto").value = codigo;
+      showToast("Código capturado!", "✅");
+    }
+  });
+};
+
 // ── Event Listeners ───────────────────────────────────────────────
 document.getElementById("btnAdicionar").addEventListener("click", window.adicionarProduto);
 document.getElementById("campoBusca").addEventListener("input", window.filtrarProdutos);
+document.getElementById("campoBusca").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    window.filtrarProdutos();
+    e.target.blur(); // esconde o teclado no celular
+  }
+});
 document.getElementById("btnBuscaCam").addEventListener("click", window.alternarScannerBusca);
 
 document.getElementById("modalFoto").addEventListener("click", () => fecharModal("modalFoto"));
@@ -539,6 +577,7 @@ document.getElementById("btnCancelarEditar").addEventListener("click", () => {
 });
 document.getElementById("btnSalvarEditar").addEventListener("click", window.salvarEdicao);
 document.getElementById("btnScanEditar").addEventListener("click", window.alternarScannerEditar);
+document.getElementById("btnScanAdd").addEventListener("click", window.alternarScannerAdd);
 
 document.getElementById("btnCancelarAjuste").addEventListener("click", () => fecharModal("modalRemoverQtd"));
 document.getElementById("btnAjusteAdd").addEventListener("click", () => confirmarAjusteQtd("add"));
@@ -554,5 +593,6 @@ document.addEventListener("keydown", (e) => {
     fecharModal("modalEditar");
     fecharModal("modalRemoverQtd");
     pararScannerGenerico(estado.scannerBusca, "scannerAreaBusca", "btnBuscaCam");
+    pararScannerGenerico(estado.scannerAdd, "scannerAreaAdd", "btnScanAdd");
   }
 });
