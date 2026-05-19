@@ -7,6 +7,10 @@ import {
   deleteDoc
 } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-firestore.js";
 
+// ZXing: fallback de leitura de código de barras para navegadores
+// que não têm a API nativa BarcodeDetector (ex.: Safari no iPhone).
+import { BrowserMultiFormatReader } from "https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.5/+esm";
+
 // ── Constantes ───────────────────────────────────────────────────
 const LIMITE_ESTOQUE_BAIXO = 2;
 const QUALIDADE_IMAGEM     = 0.7;
@@ -22,9 +26,9 @@ const estado = {
   produtoAtual:     { id: null, nome: "", qtd: 0 },
   editarId:         null,
   termoBusca:       "",          // mantém o filtro ativo após alterações
-  scannerBusca:     { stream: null, interval: null, ativo: false },
-  scannerEditar:    { stream: null, interval: null, ativo: false },
-  scannerAdd:       { stream: null, interval: null, ativo: false }
+  scannerBusca:     { stream: null, interval: null, ativo: false, zxingReader: null },
+  scannerEditar:    { stream: null, interval: null, ativo: false, zxingReader: null },
+  scannerAdd:       { stream: null, interval: null, ativo: false, zxingReader: null }
 };
 
 // ── Elementos do DOM ─────────────────────────────────────────────
@@ -448,6 +452,8 @@ async function remover(id, nome) {
 }
 
 // ── Scanner de câmera (genérico) ─────────────────────────────────
+// Usa BarcodeDetector nativo quando disponível (Chrome Android/Desktop)
+// e cai pra ZXing como fallback (Safari iOS, Firefox, etc.).
 async function iniciarScannerGenerico(scannerState, config) {
   const { areaId, videoId, btnId, onDetect } = config;
   const area  = document.getElementById(areaId);
@@ -456,28 +462,51 @@ async function iniciarScannerGenerico(scannerState, config) {
 
   try {
     scannerState.stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: "environment" }
+      video: {
+        facingMode: { ideal: "environment" },
+        width:  { ideal: 1280 },
+        height: { ideal: 720 }
+      },
+      audio: false
     });
-    video.srcObject    = scannerState.stream;
+    video.srcObject = scannerState.stream;
+    video.setAttribute("playsinline", "true"); // garante inline no iOS
+    video.muted = true;
     area.style.display = "block";
     btn.classList.add("ativo");
     scannerState.ativo = true;
 
+    // iOS às vezes não dá play sozinho — forçamos
+    try { await video.play(); } catch (_) {}
+
+    const callback = (codigo) => {
+      onDetect(codigo);
+      pararScannerGenerico(scannerState, areaId, btnId);
+    };
+
     if ("BarcodeDetector" in window) {
+      // ── Caminho rápido: API nativa (Chrome Android/Desktop)
       const detector = new BarcodeDetector({ formats: BARCODE_FORMATS });
       scannerState.interval = setInterval(async () => {
         if (video.readyState !== video.HAVE_ENOUGH_DATA) return;
         try {
           const barcodes = await detector.detect(video);
-          if (barcodes.length > 0) {
-            onDetect(barcodes[0].rawValue);
-            pararScannerGenerico(scannerState, areaId, btnId);
-          }
+          if (barcodes.length > 0) callback(barcodes[0].rawValue);
         } catch (_) {}
       }, SCANNER_INTERVALO_MS);
     } else {
+      // ── Fallback: ZXing (Safari iOS, etc.)
+      const reader = new BrowserMultiFormatReader();
+      scannerState.zxingReader = reader;
+      reader.decodeFromStream(scannerState.stream, video, (result, err) => {
+        if (result) callback(result.getText());
+        // erros de "não encontrou nada nesse frame" são normais — ignoramos
+      }).catch((e) => {
+        console.error("Erro ZXing:", e);
+      });
+
       const hint = area.querySelector(".scan-hint");
-      if (hint) hint.textContent = "Câmera ativa. Digite o código no campo acima caso não seja detectado automaticamente.";
+      if (hint) hint.textContent = "Aponte a câmera para o código de barras";
     }
   } catch (err) {
     showToast("Não foi possível acessar a câmera", "❌");
@@ -488,6 +517,12 @@ async function iniciarScannerGenerico(scannerState, config) {
 function pararScannerGenerico(scannerState, areaId, btnId) {
   clearInterval(scannerState.interval);
   scannerState.interval = null;
+
+  // Para o leitor ZXing, se estiver ativo
+  if (scannerState.zxingReader) {
+    try { scannerState.zxingReader.reset(); } catch (_) {}
+    scannerState.zxingReader = null;
+  }
 
   if (scannerState.stream) {
     scannerState.stream.getTracks().forEach(t => t.stop());
