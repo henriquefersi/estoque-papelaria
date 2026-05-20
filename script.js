@@ -479,9 +479,15 @@ async function iniciarScannerGenerico(scannerState, config) {
     // iOS às vezes não dá play sozinho — forçamos
     try { await video.play(); } catch (_) {}
 
+    // Flag para garantir que só processamos UMA detecção por sessão.
+    // Sem isso, o ZXing continua disparando o callback em loop até o
+    // stream ser totalmente fechado, causando "código escaneado" piscando.
+    scannerState.detectado = false;
     const callback = (codigo) => {
-      onDetect(codigo);
+      if (scannerState.detectado) return;
+      scannerState.detectado = true;
       pararScannerGenerico(scannerState, areaId, btnId);
+      onDetect(codigo);
     };
 
     if ("BarcodeDetector" in window) {
