@@ -83,7 +83,60 @@
     </div>
   </div>
 
-  <div class="container">
+  <!-- Modal: Lista de Reposição -->
+  <div class="modal-overlay" id="modalReposicao">
+    <div class="modal-box modal-reposicao-box">
+      <div class="modal-reposicao-header">
+        <h3 class="modal-titulo">🛒 Lista de Reposição</h3>
+        <button class="modal-fechar-x" id="btnFecharReposicao">✕</button>
+      </div>
+
+      <div class="reposicao-info" id="reposicaoInfo">
+        0 produtos para buscar no depósito
+      </div>
+
+      <div id="listaReposicao" class="lista-reposicao-itens"></div>
+
+      <div class="reposicao-acoes">
+        <button class="btn-reposicao btn-reposicao-imprimir" id="btnImprimirLista">
+          🖨️ Imprimir
+        </button>
+        <button class="btn-reposicao btn-reposicao-compartilhar" id="btnCompartilharLista">
+          📤 Compartilhar
+        </button>
+      </div>
+
+      <button class="btn-reposicao btn-reposicao-finalizar" id="btnFinalizarReposicao">
+        <div class="spinner" id="spinnerFinalizar"></div>
+        <span id="textoFinalizar">✅ Finalizar e descontar do estoque</span>
+      </button>
+
+      <button class="btn-reposicao btn-reposicao-limpar" id="btnLimparReposicao">
+        🗑️ Limpar lista
+      </button>
+    </div>
+  </div>
+
+  <!-- Área de impressão (oculta na tela, aparece só ao imprimir) -->
+  <div id="areaImpressao" class="area-impressao">
+    <h1 id="impressaoTitulo">🛒 Lista de Reposição</h1>
+    <p id="impressaoData"></p>
+    <table id="tabelaImpressao">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Produto</th>
+          <th>Cód. Barras</th>
+          <th>Estoque</th>
+          <th>Levar</th>
+        </tr>
+      </thead>
+      <tbody id="corpoImpressao"></tbody>
+    </table>
+    <p class="impressao-rodape">Estoque da Papelaria</p>
+  </div>
+
+  <div class="container conteudo-app">
 
     <!-- Header -->
     <div class="header">
@@ -198,6 +251,18 @@
       <ul id="listaProdutos"></ul>
     </div>
 
+  </div>
+
+  <!-- Banner flutuante: Lista de Reposição -->
+  <div id="bannerReposicao" class="banner-reposicao" style="display:none;">
+    <div class="banner-reposicao-conteudo">
+      <span class="banner-reposicao-icone">🛒</span>
+      <div class="banner-reposicao-texto">
+        <div class="banner-reposicao-titulo">Lista de reposição</div>
+        <div class="banner-reposicao-sub" id="bannerReposicaoSub">0 produtos para buscar</div>
+      </div>
+      <div class="banner-reposicao-cta">Ver lista →</div>
+    </div>
   </div>
 
   <!-- Firebase -->

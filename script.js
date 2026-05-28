@@ -4,7 +4,8 @@ import {
   getDocs,
   doc,
   updateDoc,
-  deleteDoc
+  deleteDoc,
+  writeBatch
 } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-firestore.js";
 
 // ZXing: fallback de leitura de código de barras para navegadores
@@ -17,6 +18,7 @@ const QUALIDADE_IMAGEM     = 0.7;
 const TAMANHO_MAX_IMAGEM   = 400;
 const SCANNER_INTERVALO_MS = 500;
 const BARCODE_FORMATS      = ["ean_13","ean_8","code_128","code_39","qr_code","upc_a","upc_e"];
+const STORAGE_KEY_REPOS    = "listaReposicao";
 
 // ── Estado centralizado ──────────────────────────────────────────
 const estado = {
@@ -28,7 +30,9 @@ const estado = {
   termoBusca:       "",          // mantém o filtro ativo após alterações
   scannerBusca:     { stream: null, interval: null, ativo: false, zxingReader: null },
   scannerEditar:    { stream: null, interval: null, ativo: false, zxingReader: null },
-  scannerAdd:       { stream: null, interval: null, ativo: false, zxingReader: null }
+  scannerAdd:       { stream: null, interval: null, ativo: false, zxingReader: null },
+  // Lista de reposição: { [produtoId]: quantidade }
+  reposicao:        carregarReposicao()
 };
 
 // ── Elementos do DOM ─────────────────────────────────────────────
@@ -58,6 +62,78 @@ function abrirModal(id) {
 
 function fecharModal(id) {
   document.getElementById(id).classList.remove("ativo");
+}
+
+// ── Lista de Reposição: persistência ─────────────────────────────
+function carregarReposicao() {
+  try {
+    const raw = sessionStorage.getItem(STORAGE_KEY_REPOS);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+function salvarReposicao() {
+  try {
+    sessionStorage.setItem(STORAGE_KEY_REPOS, JSON.stringify(estado.reposicao));
+  } catch (err) {
+    console.error("Erro ao salvar lista de reposição:", err);
+  }
+}
+
+function totalProdutosReposicao() {
+  return Object.keys(estado.reposicao).length;
+}
+
+function atualizarBannerReposicao() {
+  const banner = document.getElementById("bannerReposicao");
+  const sub    = document.getElementById("bannerReposicaoSub");
+  const total  = totalProdutosReposicao();
+
+  if (total === 0) {
+    banner.style.display = "none";
+  } else {
+    banner.style.display = "block";
+    sub.textContent = total === 1
+      ? "1 produto para buscar"
+      : `${total} produtos para buscar`;
+  }
+}
+
+function toggleReposicao(produtoId, estoqueAtual) {
+  if (estoqueAtual <= 0) {
+    showToast("Produto sem estoque no depósito", "⚠️");
+    return;
+  }
+
+  if (estado.reposicao[produtoId] !== undefined) {
+    // Já estava marcado → desmarca
+    delete estado.reposicao[produtoId];
+  } else {
+    // Marca com quantidade inicial 1
+    estado.reposicao[produtoId] = 1;
+  }
+
+  salvarReposicao();
+  atualizarBannerReposicao();
+  // Atualizar visual do checkbox sem reconstruir a lista inteira
+  atualizarCheckboxesVisuais();
+}
+
+function atualizarCheckboxesVisuais() {
+  document.querySelectorAll(".produto-item").forEach(li => {
+    const id = li.dataset.produtoId;
+    const check = li.querySelector(".reposicao-check");
+    if (!check) return;
+    if (estado.reposicao[id] !== undefined) {
+      check.classList.add("ativo");
+      li.classList.add("produto-marcado");
+    } else {
+      check.classList.remove("ativo");
+      li.classList.remove("produto-marcado");
+    }
+  });
 }
 
 // ── Upload de imagem ─────────────────────────────────────────────
@@ -121,6 +197,24 @@ async function mostrarProdutos() {
     querySnapshot.forEach((documento) => {
       estado.todosProdutos.push({ id: documento.id, ...documento.data() });
     });
+
+    // Limpa da reposição qualquer produto que não existe mais OU que está sem estoque
+    let mudouReposicao = false;
+    for (const id of Object.keys(estado.reposicao)) {
+      const prod = estado.todosProdutos.find(p => p.id === id);
+      if (!prod || Number(prod.quantidade) <= 0) {
+        delete estado.reposicao[id];
+        mudouReposicao = true;
+      } else {
+        // Ajusta a quantidade se ultrapassar o novo estoque
+        if (estado.reposicao[id] > Number(prod.quantidade)) {
+          estado.reposicao[id] = Number(prod.quantidade);
+          mudouReposicao = true;
+        }
+      }
+    }
+    if (mudouReposicao) salvarReposicao();
+
     // Reaplicar o filtro ativo (mantém a busca após alterações)
     if (estado.termoBusca) {
       const termo = estado.termoBusca.toLowerCase();
@@ -131,6 +225,8 @@ async function mostrarProdutos() {
     } else {
       renderizarLista(estado.todosProdutos);
     }
+
+    atualizarBannerReposicao();
   } catch (err) {
     showToast("Erro ao carregar produtos", "❌");
     console.error(err);
@@ -164,9 +260,20 @@ function renderizarLista(produtos) {
       ? `<span class="barcode-tag" title="Código de barras">⬛ ${produto.codigoBarras}</span>`
       : "";
 
+    const marcado     = estado.reposicao[produto.id] !== undefined;
+    const checkAtivo  = marcado ? "ativo" : "";
+    const liMarcado   = marcado ? "produto-marcado" : "";
+    const semEstoque  = quantidade <= 0;
+    const checkDisabled = semEstoque ? "disabled" : "";
+
     const li = document.createElement("li");
-    li.className = "produto-item";
+    li.className = `produto-item ${liMarcado}`;
+    li.dataset.produtoId = produto.id;
     li.innerHTML = `
+      <button class="reposicao-check ${checkAtivo}" title="Adicionar à lista de reposição"
+              aria-label="Marcar ${produto.nome} para reposição" ${checkDisabled}>
+        <span class="reposicao-check-icone">✓</span>
+      </button>
       <img src="${imagem}" class="img-produto"
            alt="Foto de ${produto.nome}"
            title="Clique para ampliar"
@@ -188,6 +295,10 @@ function renderizarLista(produtos) {
       </div>
     `;
 
+    li.querySelector(".reposicao-check").addEventListener("click", (e) => {
+      e.stopPropagation();
+      toggleReposicao(produto.id, quantidade);
+    });
     li.querySelector(".img-produto").addEventListener("click", () => abrirModalFoto(imagem));
     li.querySelector(".btn-mais").addEventListener("click", () => aumentar(produto.id, quantidade));
     li.querySelector(".btn-menos").addEventListener("click", () => diminuir(produto.id, quantidade));
@@ -443,12 +554,279 @@ async function remover(id, nome) {
   showLoading("Removendo produto...");
   try {
     await deleteDoc(doc(window.db, "produtos", id));
+    // Limpa da reposição se estiver lá
+    if (estado.reposicao[id] !== undefined) {
+      delete estado.reposicao[id];
+      salvarReposicao();
+    }
     showToast(`"${nome}" removido`, "🗑️");
     await mostrarProdutos();
   } catch (err) {
     showToast("Erro ao remover", "❌");
     hideLoading();
   }
+}
+
+// ── Modal de Reposição ────────────────────────────────────────────
+function abrirModalReposicao() {
+  const total = totalProdutosReposicao();
+  if (total === 0) {
+    showToast("Nenhum produto marcado", "⚠️");
+    return;
+  }
+  renderizarModalReposicao();
+  abrirModal("modalReposicao");
+}
+
+function renderizarModalReposicao() {
+  const container = document.getElementById("listaReposicao");
+  const info      = document.getElementById("reposicaoInfo");
+  const total     = totalProdutosReposicao();
+
+  info.textContent = total === 1
+    ? "1 produto para buscar no depósito"
+    : `${total} produtos para buscar no depósito`;
+
+  container.innerHTML = "";
+
+  // Ordena por nome do produto pra ficar mais fácil de seguir no depósito
+  const ids = Object.keys(estado.reposicao);
+  const itens = ids
+    .map(id => estado.todosProdutos.find(p => p.id === id))
+    .filter(p => p)
+    .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
+
+  itens.forEach((produto, index) => {
+    const estoque    = Number(produto.quantidade) || 0;
+    const aLevar     = estado.reposicao[produto.id];
+    const imagem     = produto.imagem || "https://placehold.co/40x40/1a1a24/8888aa?text=?";
+    const barcode    = produto.codigoBarras ? `⬛ ${produto.codigoBarras}` : "(sem código)";
+    const estoqueBx  = estoque <= LIMITE_ESTOQUE_BAIXO;
+    const estoqueLbl = estoqueBx ? `⚠️ ${estoque} un` : `${estoque} un`;
+    const estoqueCss = estoqueBx ? "estoque-baixo" : "";
+
+    const div = document.createElement("div");
+    div.className = "item-reposicao";
+    div.innerHTML = `
+      <div class="item-reposicao-topo">
+        <span class="item-reposicao-num">${index + 1}.</span>
+        <img src="${imagem}" class="item-reposicao-img"
+             onerror="this.src='https://placehold.co/40x40/1a1a24/8888aa?text=?'"
+             alt="${produto.nome}">
+        <div class="item-reposicao-info">
+          <div class="item-reposicao-nome">${produto.nome}</div>
+          <div class="item-reposicao-codigo">${barcode}</div>
+        </div>
+        <button class="item-reposicao-remover" title="Remover da lista"
+                aria-label="Remover ${produto.nome} da lista">✕</button>
+      </div>
+      <div class="item-reposicao-controles">
+        <div class="item-reposicao-estoque ${estoqueCss}">
+          Estoque: <strong>${estoqueLbl}</strong>
+        </div>
+        <div class="item-reposicao-levar">
+          <span class="levar-label">Levar:</span>
+          <button class="btn-qtd btn-qtd-menos" aria-label="Diminuir">−</button>
+          <span class="qtd-valor">${aLevar}</span>
+          <button class="btn-qtd btn-qtd-mais" aria-label="Aumentar">+</button>
+        </div>
+      </div>
+    `;
+
+    div.querySelector(".item-reposicao-remover").addEventListener("click", () => {
+      delete estado.reposicao[produto.id];
+      salvarReposicao();
+      atualizarBannerReposicao();
+      atualizarCheckboxesVisuais();
+      if (totalProdutosReposicao() === 0) {
+        fecharModal("modalReposicao");
+        showToast("Lista esvaziada", "🗑️");
+      } else {
+        renderizarModalReposicao();
+      }
+    });
+
+    div.querySelector(".btn-qtd-menos").addEventListener("click", () => {
+      if (estado.reposicao[produto.id] > 1) {
+        estado.reposicao[produto.id]--;
+        salvarReposicao();
+        renderizarModalReposicao();
+      }
+    });
+
+    div.querySelector(".btn-qtd-mais").addEventListener("click", () => {
+      if (estado.reposicao[produto.id] < estoque) {
+        estado.reposicao[produto.id]++;
+        salvarReposicao();
+        renderizarModalReposicao();
+      } else {
+        showToast(`Estoque máximo é ${estoque}`, "⚠️");
+      }
+    });
+
+    container.appendChild(div);
+  });
+}
+
+// ── Imprimir lista ────────────────────────────────────────────────
+function imprimirLista() {
+  const corpo  = document.getElementById("corpoImpressao");
+  const dataEl = document.getElementById("impressaoData");
+
+  // Formata data atual em pt-BR
+  const agora = new Date();
+  const dataFmt = agora.toLocaleDateString("pt-BR", {
+    day: "2-digit", month: "2-digit", year: "numeric",
+    hour: "2-digit", minute: "2-digit"
+  });
+  dataEl.textContent = `Gerada em ${dataFmt}`;
+
+  // Monta a tabela
+  corpo.innerHTML = "";
+  const itens = Object.keys(estado.reposicao)
+    .map(id => estado.todosProdutos.find(p => p.id === id))
+    .filter(p => p)
+    .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
+
+  itens.forEach((produto, index) => {
+    const estoque = Number(produto.quantidade) || 0;
+    const aLevar  = estado.reposicao[produto.id];
+    const barcode = produto.codigoBarras || "—";
+
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${index + 1}</td>
+      <td>${produto.nome}</td>
+      <td>${barcode}</td>
+      <td>${estoque}</td>
+      <td><strong>${aLevar}</strong></td>
+    `;
+    corpo.appendChild(tr);
+  });
+
+  // Aciona impressão do navegador
+  window.print();
+}
+
+// ── Compartilhar lista ────────────────────────────────────────────
+async function compartilharLista() {
+  const itens = Object.keys(estado.reposicao)
+    .map(id => estado.todosProdutos.find(p => p.id === id))
+    .filter(p => p)
+    .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
+
+  const agora = new Date();
+  const dataFmt = agora.toLocaleDateString("pt-BR", {
+    day: "2-digit", month: "2-digit", year: "numeric",
+    hour: "2-digit", minute: "2-digit"
+  });
+
+  let texto = `🛒 *Lista de Reposição*\n_Gerada em ${dataFmt}_\n\n`;
+  itens.forEach((produto, index) => {
+    const estoque = Number(produto.quantidade) || 0;
+    const aLevar  = estado.reposicao[produto.id];
+    const barcode = produto.codigoBarras ? ` (${produto.codigoBarras})` : "";
+    texto += `${index + 1}. *${produto.nome}*${barcode}\n   Estoque: ${estoque} un · *Levar: ${aLevar} un*\n\n`;
+  });
+  texto += "_Estoque da Papelaria_";
+
+  // Tenta Web Share API (mobile) → fallback pra clipboard
+  if (navigator.share) {
+    try {
+      await navigator.share({ title: "Lista de Reposição", text: texto });
+    } catch (err) {
+      // Usuário cancelou — sem ação
+      if (err.name !== "AbortError") {
+        copiarParaClipboard(texto);
+      }
+    }
+  } else {
+    copiarParaClipboard(texto);
+  }
+}
+
+async function copiarParaClipboard(texto) {
+  try {
+    await navigator.clipboard.writeText(texto);
+    showToast("Lista copiada! Cole no WhatsApp", "📋");
+  } catch (err) {
+    showToast("Não foi possível copiar", "❌");
+    console.error(err);
+  }
+}
+
+// ── Finalizar reposição (descontar do estoque) ────────────────────
+async function finalizarReposicao() {
+  const itens = Object.keys(estado.reposicao)
+    .map(id => ({
+      id,
+      qtdLevar: estado.reposicao[id],
+      produto: estado.todosProdutos.find(p => p.id === id)
+    }))
+    .filter(item => item.produto);
+
+  if (itens.length === 0) {
+    showToast("Lista vazia", "⚠️");
+    return;
+  }
+
+  // Monta mensagem de confirmação
+  const resumo = itens
+    .map(({ produto, qtdLevar }) => `• ${qtdLevar} ${produto.nome}`)
+    .join("\n");
+
+  const confirma = confirm(
+    `Confirmar saída do depósito?\n\nVai ser descontado do estoque:\n${resumo}\n\nEssa ação não pode ser desfeita.`
+  );
+
+  if (!confirma) return;
+
+  const btn     = document.getElementById("btnFinalizarReposicao");
+  const spinner = document.getElementById("spinnerFinalizar");
+  const texto   = document.getElementById("textoFinalizar");
+
+  btn.disabled = true;
+  spinner.classList.add("ativo");
+  texto.textContent = "Descontando...";
+
+  try {
+    // Faz tudo numa única operação atômica (batch)
+    const batch = writeBatch(window.db);
+    itens.forEach(({ id, qtdLevar, produto }) => {
+      const novoEstoque = Math.max(0, (Number(produto.quantidade) || 0) - qtdLevar);
+      batch.update(doc(window.db, "produtos", id), { quantidade: novoEstoque });
+    });
+    await batch.commit();
+
+    // Limpa a lista de reposição
+    estado.reposicao = {};
+    salvarReposicao();
+    atualizarBannerReposicao();
+
+    fecharModal("modalReposicao");
+    showToast(`${itens.length} produto(s) descontado(s) do estoque!`, "✅");
+    await mostrarProdutos();
+  } catch (err) {
+    showToast("Erro ao descontar do estoque", "❌");
+    console.error(err);
+  } finally {
+    btn.disabled = false;
+    spinner.classList.remove("ativo");
+    texto.textContent = "✅ Finalizar e descontar do estoque";
+  }
+}
+
+// ── Limpar lista de reposição ─────────────────────────────────────
+function limparReposicao() {
+  if (totalProdutosReposicao() === 0) return;
+  if (!confirm("Limpar toda a lista de reposição?")) return;
+
+  estado.reposicao = {};
+  salvarReposicao();
+  atualizarBannerReposicao();
+  atualizarCheckboxesVisuais();
+  fecharModal("modalReposicao");
+  showToast("Lista limpa", "🗑️");
 }
 
 // ── Scanner de câmera (genérico) ─────────────────────────────────
@@ -556,10 +934,17 @@ window.alternarScannerBusca = async function () {
       const campo = document.getElementById("campoBusca");
       campo.value = codigo;
       estado.termoBusca = codigo.toLowerCase();
-      renderizarLista(estado.todosProdutos.filter(p =>
+
+      const encontrados = estado.todosProdutos.filter(p =>
         p.codigoBarras && p.codigoBarras.includes(codigo)
-      ));
-      showToast("Código escaneado!", "✅");
+      );
+      renderizarLista(encontrados);
+
+      if (encontrados.length === 0) {
+        showToast(`Código ${codigo} não cadastrado`, "⚠️");
+      } else {
+        showToast("Código escaneado!", "✅");
+      }
     }
   });
 };
@@ -575,7 +960,16 @@ window.alternarScannerEditar = async function () {
     btnId:   "btnScanEditar",
     onDetect: (codigo) => {
       document.getElementById("inputEditarBarcode").value = codigo;
-      showToast("Código capturado!", "✅");
+
+      // Verifica se o código está em uso por OUTRO produto (ignora o que está sendo editado)
+      const existente = estado.todosProdutos.find(
+        p => p.codigoBarras && p.codigoBarras === codigo && p.id !== estado.editarId
+      );
+      if (existente) {
+        showToast(`Código já cadastrado em "${existente.nome}"`, "⚠️");
+      } else {
+        showToast("Código capturado!", "✅");
+      }
     }
   });
 };
@@ -591,7 +985,15 @@ window.alternarScannerAdd = async function () {
     btnId:   "btnScanAdd",
     onDetect: (codigo) => {
       document.getElementById("codigoBarrasProduto").value = codigo;
-      showToast("Código capturado!", "✅");
+
+      const existente = estado.todosProdutos.find(
+        p => p.codigoBarras && p.codigoBarras === codigo
+      );
+      if (existente) {
+        showToast(`Código já cadastrado em "${existente.nome}"`, "⚠️");
+      } else {
+        showToast("Código capturado!", "✅");
+      }
     }
   });
 };
@@ -604,6 +1006,18 @@ document.getElementById("campoBusca").addEventListener("keydown", (e) => {
     e.preventDefault();
     window.filtrarProdutos();
     e.target.blur(); // esconde o teclado no celular
+
+    // Se o termo parece um código de barras (só dígitos, 8+) e nada foi encontrado, avisa
+    const termo = e.target.value.trim();
+    const pareceCodigo = /^\d{8,}$/.test(termo);
+    if (pareceCodigo) {
+      const encontrou = estado.todosProdutos.some(p =>
+        p.codigoBarras && p.codigoBarras.includes(termo)
+      );
+      if (!encontrou) {
+        showToast(`Código ${termo} não cadastrado`, "⚠️");
+      }
+    }
   }
 });
 document.getElementById("btnBuscaCam").addEventListener("click", window.alternarScannerBusca);
@@ -627,13 +1041,25 @@ document.getElementById("inputRemoverQtd").addEventListener("keydown", (e) => {
   if (e.key === "Enter") confirmarAjusteQtd("add");
 });
 
+// ── Listeners da Lista de Reposição ───────────────────────────────
+document.getElementById("bannerReposicao").addEventListener("click", abrirModalReposicao);
+document.getElementById("btnFecharReposicao").addEventListener("click", () => fecharModal("modalReposicao"));
+document.getElementById("btnImprimirLista").addEventListener("click", imprimirLista);
+document.getElementById("btnCompartilharLista").addEventListener("click", compartilharLista);
+document.getElementById("btnFinalizarReposicao").addEventListener("click", finalizarReposicao);
+document.getElementById("btnLimparReposicao").addEventListener("click", limparReposicao);
+
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
     fecharModal("modalFoto");
     pararScannerGenerico(estado.scannerEditar, "scannerAreaEditar", "btnScanEditar");
     fecharModal("modalEditar");
     fecharModal("modalRemoverQtd");
+    fecharModal("modalReposicao");
     pararScannerGenerico(estado.scannerBusca, "scannerAreaBusca", "btnBuscaCam");
     pararScannerGenerico(estado.scannerAdd, "scannerAreaAdd", "btnScanAdd");
   }
 });
+
+// Atualiza banner ao carregar (caso já tenha lista persistida na sessão)
+atualizarBannerReposicao();
