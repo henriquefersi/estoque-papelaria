@@ -67,7 +67,7 @@ function fecharModal(id) {
 // ── Lista de Reposição: persistência ─────────────────────────────
 function carregarReposicao() {
   try {
-    const raw = sessionStorage.getItem(STORAGE_KEY_REPOS);
+    const raw = localStorage.getItem(STORAGE_KEY_REPOS);
     return raw ? JSON.parse(raw) : {};
   } catch {
     return {};
@@ -76,7 +76,7 @@ function carregarReposicao() {
 
 function salvarReposicao() {
   try {
-    sessionStorage.setItem(STORAGE_KEY_REPOS, JSON.stringify(estado.reposicao));
+    localStorage.setItem(STORAGE_KEY_REPOS, JSON.stringify(estado.reposicao));
   } catch (err) {
     console.error("Erro ao salvar lista de reposição:", err);
   }
