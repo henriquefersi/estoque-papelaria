@@ -5,7 +5,11 @@ import {
   doc,
   updateDoc,
   deleteDoc,
-  writeBatch
+  writeBatch,
+  setDoc,
+  onSnapshot,
+  deleteField,
+  serverTimestamp
 } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-firestore.js";
 
 // ZXing: fallback de leitura de código de barras para navegadores
@@ -18,7 +22,14 @@ const QUALIDADE_IMAGEM     = 0.7;
 const TAMANHO_MAX_IMAGEM   = 400;
 const SCANNER_INTERVALO_MS = 500;
 const BARCODE_FORMATS      = ["ean_13","ean_8","code_128","code_39","qr_code","upc_a","upc_e"];
-const STORAGE_KEY_REPOS    = "listaReposicao";
+
+// Caminho do documento da lista de reposição no Firestore
+// Estrutura: config/listaReposicao = { produtos: {[id]: qtd}, atualizadoEm: ts }
+const REPOS_COLLECTION = "config";
+const REPOS_DOC_ID     = "listaReposicao";
+
+// Limpa lixo do localStorage de versões anteriores
+try { localStorage.removeItem("listaReposicao"); } catch {}
 
 // ── Estado centralizado ──────────────────────────────────────────
 const estado = {
@@ -31,8 +42,12 @@ const estado = {
   scannerBusca:     { stream: null, interval: null, ativo: false, zxingReader: null },
   scannerEditar:    { stream: null, interval: null, ativo: false, zxingReader: null },
   scannerAdd:       { stream: null, interval: null, ativo: false, zxingReader: null },
-  // Lista de reposição: { [produtoId]: quantidade }
-  reposicao:        carregarReposicao()
+  // Lista de reposição (sincronizada via Firestore): { [produtoId]: quantidade }
+  reposicao:        {},
+  // Flag para distinguir limpeza/finalização LOCAL de REMOTA (outro dispositivo)
+  finalizandoLocal: false,
+  // Flag pra saber se o listener da reposição já foi iniciado
+  listenerReposicaoAtivo: false
 };
 
 // ── Elementos do DOM ─────────────────────────────────────────────
@@ -64,22 +79,69 @@ function fecharModal(id) {
   document.getElementById(id).classList.remove("ativo");
 }
 
-// ── Lista de Reposição: persistência ─────────────────────────────
-function carregarReposicao() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY_REPOS);
-    return raw ? JSON.parse(raw) : {};
-  } catch {
-    return {};
-  }
+// ── Lista de Reposição: sincronização com Firestore ─────────────
+// Referência do documento da lista
+function refReposicao() {
+  return doc(window.db, REPOS_COLLECTION, REPOS_DOC_ID);
 }
 
-function salvarReposicao() {
-  try {
-    localStorage.setItem(STORAGE_KEY_REPOS, JSON.stringify(estado.reposicao));
-  } catch (err) {
-    console.error("Erro ao salvar lista de reposição:", err);
-  }
+// Inicia o listener em tempo real (chamado uma vez após login)
+function iniciarListenerReposicao() {
+  if (estado.listenerReposicaoAtivo) return;
+  estado.listenerReposicaoAtivo = true;
+
+  onSnapshot(refReposicao(), (snap) => {
+    const novaReposicao = (snap.exists() && snap.data().produtos) || {};
+
+    const antesTinha = Object.keys(estado.reposicao).length;
+    const agoraTem   = Object.keys(novaReposicao).length;
+
+    estado.reposicao = novaReposicao;
+    atualizarBannerReposicao();
+    atualizarCheckboxesVisuais();
+
+    const modal       = document.getElementById("modalReposicao");
+    const modalAberto = modal && modal.classList.contains("ativo");
+
+    // Detecta finalização/limpeza vinda de outro dispositivo
+    const ehFinalizacaoLocal = estado.finalizandoLocal;
+    estado.finalizandoLocal = false;
+
+    if (modalAberto) {
+      if (antesTinha > 0 && agoraTem === 0 && !ehFinalizacaoLocal) {
+        // Outro dispositivo finalizou ou limpou a lista
+        fecharModal("modalReposicao");
+        showToast("Lista finalizada em outro dispositivo", "ℹ️");
+      } else if (agoraTem > 0) {
+        // Re-renderiza pra refletir mudanças vindas de outros dispositivos
+        renderizarModalReposicao();
+      }
+    }
+  }, (err) => {
+    console.error("Erro no listener da lista de reposição:", err);
+  });
+}
+
+// Operações de escrita no Firestore
+async function setItemReposicao(produtoId, quantidade) {
+  await setDoc(refReposicao(), {
+    produtos: { [produtoId]: quantidade },
+    atualizadoEm: serverTimestamp()
+  }, { merge: true });
+}
+
+async function removerItemReposicao(produtoId) {
+  await setDoc(refReposicao(), {
+    produtos: { [produtoId]: deleteField() },
+    atualizadoEm: serverTimestamp()
+  }, { merge: true });
+}
+
+async function limparReposicaoFirestore() {
+  await setDoc(refReposicao(), {
+    produtos: {},
+    atualizadoEm: serverTimestamp()
+  });
 }
 
 function totalProdutosReposicao() {
@@ -101,24 +163,42 @@ function atualizarBannerReposicao() {
   }
 }
 
-function toggleReposicao(produtoId, estoqueAtual) {
+async function toggleReposicao(produtoId, estoqueAtual) {
   if (estoqueAtual <= 0) {
     showToast("Produto sem estoque no depósito", "⚠️");
     return;
   }
 
-  if (estado.reposicao[produtoId] !== undefined) {
-    // Já estava marcado → desmarca
+  const jaTem = estado.reposicao[produtoId] !== undefined;
+
+  // Atualização otimista local (UI responde rápido)
+  if (jaTem) {
     delete estado.reposicao[produtoId];
   } else {
-    // Marca com quantidade inicial 1
     estado.reposicao[produtoId] = 1;
   }
-
-  salvarReposicao();
   atualizarBannerReposicao();
-  // Atualizar visual do checkbox sem reconstruir a lista inteira
   atualizarCheckboxesVisuais();
+
+  // Persistir no Firestore (sincroniza com outros dispositivos)
+  try {
+    if (jaTem) {
+      await removerItemReposicao(produtoId);
+    } else {
+      await setItemReposicao(produtoId, 1);
+    }
+  } catch (err) {
+    // Reverter atualização otimista em caso de erro
+    if (jaTem) {
+      estado.reposicao[produtoId] = 1;
+    } else {
+      delete estado.reposicao[produtoId];
+    }
+    atualizarBannerReposicao();
+    atualizarCheckboxesVisuais();
+    showToast("Erro ao atualizar lista", "❌");
+    console.error(err);
+  }
 }
 
 function atualizarCheckboxesVisuais() {
@@ -198,22 +278,38 @@ async function mostrarProdutos() {
       estado.todosProdutos.push({ id: documento.id, ...documento.data() });
     });
 
-    // Limpa da reposição qualquer produto que não existe mais OU que está sem estoque
-    let mudouReposicao = false;
+    // Inicia o listener da lista de reposição (uma única vez por sessão)
+    iniciarListenerReposicao();
+
+    // Limpa da reposição qualquer produto que não existe mais OU que está sem estoque.
+    // Como o listener pode ainda não ter chegado, fazemos isso de forma idempotente:
+    // tentamos sincronizar com o Firestore (se falhar, o estado local segue válido).
+    const ajustesReposicao = [];
     for (const id of Object.keys(estado.reposicao)) {
       const prod = estado.todosProdutos.find(p => p.id === id);
       if (!prod || Number(prod.quantidade) <= 0) {
         delete estado.reposicao[id];
-        mudouReposicao = true;
-      } else {
+        ajustesReposicao.push({ id, acao: "remover" });
+      } else if (estado.reposicao[id] > Number(prod.quantidade)) {
         // Ajusta a quantidade se ultrapassar o novo estoque
-        if (estado.reposicao[id] > Number(prod.quantidade)) {
-          estado.reposicao[id] = Number(prod.quantidade);
-          mudouReposicao = true;
-        }
+        const novaQtd = Number(prod.quantidade);
+        estado.reposicao[id] = novaQtd;
+        ajustesReposicao.push({ id, acao: "ajustar", qtd: novaQtd });
       }
     }
-    if (mudouReposicao) salvarReposicao();
+
+    // Propaga ajustes pro Firestore em background (não trava a UI)
+    for (const ajuste of ajustesReposicao) {
+      try {
+        if (ajuste.acao === "remover") {
+          await removerItemReposicao(ajuste.id);
+        } else {
+          await setItemReposicao(ajuste.id, ajuste.qtd);
+        }
+      } catch (err) {
+        console.error("Erro ao sincronizar ajuste da reposição:", err);
+      }
+    }
 
     // Reaplicar o filtro ativo (mantém a busca após alterações)
     if (estado.termoBusca) {
@@ -554,10 +650,10 @@ async function remover(id, nome) {
   showLoading("Removendo produto...");
   try {
     await deleteDoc(doc(window.db, "produtos", id));
-    // Limpa da reposição se estiver lá
+    // Limpa da reposição se estiver lá (local + Firestore)
     if (estado.reposicao[id] !== undefined) {
       delete estado.reposicao[id];
-      salvarReposicao();
+      try { await removerItemReposicao(id); } catch (e) { console.error(e); }
     }
     showToast(`"${nome}" removido`, "🗑️");
     await mostrarProdutos();
@@ -633,32 +729,63 @@ function renderizarModalReposicao() {
       </div>
     `;
 
-    div.querySelector(".item-reposicao-remover").addEventListener("click", () => {
+    div.querySelector(".item-reposicao-remover").addEventListener("click", async () => {
+      // Atualização otimista
+      const qtdAnterior = estado.reposicao[produto.id];
       delete estado.reposicao[produto.id];
-      salvarReposicao();
       atualizarBannerReposicao();
       atualizarCheckboxesVisuais();
-      if (totalProdutosReposicao() === 0) {
+
+      const ficouVazio = totalProdutosReposicao() === 0;
+      if (ficouVazio) {
+        estado.finalizandoLocal = true; // evita o toast "finalizada em outro dispositivo"
         fecharModal("modalReposicao");
         showToast("Lista esvaziada", "🗑️");
       } else {
         renderizarModalReposicao();
       }
-    });
 
-    div.querySelector(".btn-qtd-menos").addEventListener("click", () => {
-      if (estado.reposicao[produto.id] > 1) {
-        estado.reposicao[produto.id]--;
-        salvarReposicao();
-        renderizarModalReposicao();
+      try {
+        await removerItemReposicao(produto.id);
+      } catch (err) {
+        // Reverte em caso de erro
+        estado.reposicao[produto.id] = qtdAnterior;
+        atualizarBannerReposicao();
+        atualizarCheckboxesVisuais();
+        showToast("Erro ao remover item", "❌");
+        console.error(err);
       }
     });
 
-    div.querySelector(".btn-qtd-mais").addEventListener("click", () => {
-      if (estado.reposicao[produto.id] < estoque) {
-        estado.reposicao[produto.id]++;
-        salvarReposicao();
+    div.querySelector(".btn-qtd-menos").addEventListener("click", async () => {
+      if (estado.reposicao[produto.id] > 1) {
+        const novaQtd = estado.reposicao[produto.id] - 1;
+        estado.reposicao[produto.id] = novaQtd;
         renderizarModalReposicao();
+        try {
+          await setItemReposicao(produto.id, novaQtd);
+        } catch (err) {
+          estado.reposicao[produto.id] = novaQtd + 1; // reverte
+          renderizarModalReposicao();
+          showToast("Erro ao atualizar", "❌");
+          console.error(err);
+        }
+      }
+    });
+
+    div.querySelector(".btn-qtd-mais").addEventListener("click", async () => {
+      if (estado.reposicao[produto.id] < estoque) {
+        const novaQtd = estado.reposicao[produto.id] + 1;
+        estado.reposicao[produto.id] = novaQtd;
+        renderizarModalReposicao();
+        try {
+          await setItemReposicao(produto.id, novaQtd);
+        } catch (err) {
+          estado.reposicao[produto.id] = novaQtd - 1; // reverte
+          renderizarModalReposicao();
+          showToast("Erro ao atualizar", "❌");
+          console.error(err);
+        }
       } else {
         showToast(`Estoque máximo é ${estoque}`, "⚠️");
       }
@@ -790,23 +917,32 @@ async function finalizarReposicao() {
   texto.textContent = "Descontando...";
 
   try {
-    // Faz tudo numa única operação atômica (batch)
+    // Marca como ação local pra o listener não disparar o toast de "finalizada em outro dispositivo"
+    estado.finalizandoLocal = true;
+
+    // Faz tudo numa única operação atômica (batch): desconta estoque + limpa lista
     const batch = writeBatch(window.db);
     itens.forEach(({ id, qtdLevar, produto }) => {
       const novoEstoque = Math.max(0, (Number(produto.quantidade) || 0) - qtdLevar);
       batch.update(doc(window.db, "produtos", id), { quantidade: novoEstoque });
     });
+    // Limpa a lista de reposição no mesmo batch (atomicidade total)
+    batch.set(refReposicao(), {
+      produtos: {},
+      atualizadoEm: serverTimestamp()
+    });
     await batch.commit();
 
-    // Limpa a lista de reposição
+    // Atualiza estado local imediatamente (listener confirmará depois)
     estado.reposicao = {};
-    salvarReposicao();
     atualizarBannerReposicao();
+    atualizarCheckboxesVisuais();
 
     fecharModal("modalReposicao");
     showToast(`${itens.length} produto(s) descontado(s) do estoque!`, "✅");
     await mostrarProdutos();
   } catch (err) {
+    estado.finalizandoLocal = false; // reseta a flag em caso de erro
     showToast("Erro ao descontar do estoque", "❌");
     console.error(err);
   } finally {
@@ -817,16 +953,34 @@ async function finalizarReposicao() {
 }
 
 // ── Limpar lista de reposição ─────────────────────────────────────
-function limparReposicao() {
+async function limparReposicao() {
   if (totalProdutosReposicao() === 0) return;
   if (!confirm("Limpar toda a lista de reposição?")) return;
 
+  // Backup pra reverter em caso de erro
+  const backup = { ...estado.reposicao };
+
+  // Marca como ação local pra o listener não disparar o toast de outro dispositivo
+  estado.finalizandoLocal = true;
+
+  // Atualização otimista
   estado.reposicao = {};
-  salvarReposicao();
   atualizarBannerReposicao();
   atualizarCheckboxesVisuais();
   fecharModal("modalReposicao");
   showToast("Lista limpa", "🗑️");
+
+  try {
+    await limparReposicaoFirestore();
+  } catch (err) {
+    // Reverte em caso de erro
+    estado.finalizandoLocal = false;
+    estado.reposicao = backup;
+    atualizarBannerReposicao();
+    atualizarCheckboxesVisuais();
+    showToast("Erro ao limpar lista", "❌");
+    console.error(err);
+  }
 }
 
 // ── Scanner de câmera (genérico) ─────────────────────────────────
@@ -1061,5 +1215,5 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
-// Atualiza banner ao carregar (caso já tenha lista persistida na sessão)
-atualizarBannerReposicao();
+// (O banner é atualizado automaticamente pelo listener da lista de reposição
+//  assim que o snapshot inicial do Firestore chega.)
