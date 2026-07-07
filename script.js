@@ -9,7 +9,9 @@ import {
   setDoc,
   onSnapshot,
   deleteField,
-  serverTimestamp
+  serverTimestamp,
+  arrayUnion,
+  arrayRemove
 } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-firestore.js";
 
 // ZXing: fallback de leitura de código de barras para navegadores
@@ -44,6 +46,8 @@ const estado = {
   scannerAdd:       { stream: null, interval: null, ativo: false, zxingReader: null },
   // Lista de reposição (sincronizada via Firestore): { [produtoId]: quantidade }
   reposicao:        {},
+  // Ordem de seleção dos produtos (na sequência em que foram marcados)
+  ordemReposicao:   [],
   // Flag para distinguir limpeza/finalização LOCAL de REMOTA (outro dispositivo)
   finalizandoLocal: false,
   // Flag pra saber se o listener da reposição já foi iniciado
@@ -91,12 +95,14 @@ function iniciarListenerReposicao() {
   estado.listenerReposicaoAtivo = true;
 
   onSnapshot(refReposicao(), (snap) => {
-    const novaReposicao = (snap.exists() && snap.data().produtos) || {};
+    const dados         = snap.exists() ? snap.data() : {};
+    const novaReposicao = dados.produtos || {};
 
     const antesTinha = Object.keys(estado.reposicao).length;
     const agoraTem   = Object.keys(novaReposicao).length;
 
-    estado.reposicao = novaReposicao;
+    estado.reposicao     = novaReposicao;
+    estado.ordemReposicao = Array.isArray(dados.ordem) ? dados.ordem : [];
     atualizarBannerReposicao();
     atualizarCheckboxesVisuais();
 
@@ -126,6 +132,7 @@ function iniciarListenerReposicao() {
 async function setItemReposicao(produtoId, quantidade) {
   await setDoc(refReposicao(), {
     produtos: { [produtoId]: quantidade },
+    ordem: arrayUnion(produtoId),   // adiciona ao fim da ordem (sem duplicar)
     atualizadoEm: serverTimestamp()
   }, { merge: true });
 }
@@ -133,6 +140,7 @@ async function setItemReposicao(produtoId, quantidade) {
 async function removerItemReposicao(produtoId) {
   await setDoc(refReposicao(), {
     produtos: { [produtoId]: deleteField() },
+    ordem: arrayRemove(produtoId),  // remove da ordem também
     atualizadoEm: serverTimestamp()
   }, { merge: true });
 }
@@ -140,8 +148,28 @@ async function removerItemReposicao(produtoId) {
 async function limparReposicaoFirestore() {
   await setDoc(refReposicao(), {
     produtos: {},
+    ordem: [],
     atualizadoEm: serverTimestamp()
   });
+}
+
+// Retorna os IDs da lista de reposição na ordem em que foram selecionados.
+// IDs sem posição registrada (dados antigos) vão para o fim.
+function idsReposicaoOrdenados() {
+  const ordem     = estado.ordemReposicao || [];
+  const presentes = new Set(Object.keys(estado.reposicao));
+  const resultado = [];
+
+  for (const id of ordem) {
+    if (presentes.has(id)) {
+      resultado.push(id);
+      presentes.delete(id);
+    }
+  }
+  // Qualquer produto sem ordem registrada entra no fim
+  for (const id of presentes) resultado.push(id);
+
+  return resultado;
 }
 
 function totalProdutosReposicao() {
@@ -174,8 +202,13 @@ async function toggleReposicao(produtoId, estoqueAtual) {
   // Atualização otimista local (UI responde rápido)
   if (jaTem) {
     delete estado.reposicao[produtoId];
+    estado.ordemReposicao = estado.ordemReposicao.filter(x => x !== produtoId);
   } else {
     estado.reposicao[produtoId] = 1;
+    // adiciona ao fim da ordem (se ainda não estiver lá)
+    if (!estado.ordemReposicao.includes(produtoId)) {
+      estado.ordemReposicao.push(produtoId);
+    }
   }
   atualizarBannerReposicao();
   atualizarCheckboxesVisuais();
@@ -191,8 +224,12 @@ async function toggleReposicao(produtoId, estoqueAtual) {
     // Reverter atualização otimista em caso de erro
     if (jaTem) {
       estado.reposicao[produtoId] = 1;
+      if (!estado.ordemReposicao.includes(produtoId)) {
+        estado.ordemReposicao.push(produtoId);
+      }
     } else {
       delete estado.reposicao[produtoId];
+      estado.ordemReposicao = estado.ordemReposicao.filter(x => x !== produtoId);
     }
     atualizarBannerReposicao();
     atualizarCheckboxesVisuais();
@@ -289,6 +326,7 @@ async function mostrarProdutos() {
       const prod = estado.todosProdutos.find(p => p.id === id);
       if (!prod || Number(prod.quantidade) <= 0) {
         delete estado.reposicao[id];
+        estado.ordemReposicao = estado.ordemReposicao.filter(x => x !== id);
         ajustesReposicao.push({ id, acao: "remover" });
       } else if (estado.reposicao[id] > Number(prod.quantidade)) {
         // Ajusta a quantidade se ultrapassar o novo estoque
@@ -653,6 +691,7 @@ async function remover(id, nome) {
     // Limpa da reposição se estiver lá (local + Firestore)
     if (estado.reposicao[id] !== undefined) {
       delete estado.reposicao[id];
+      estado.ordemReposicao = estado.ordemReposicao.filter(x => x !== id);
       try { await removerItemReposicao(id); } catch (e) { console.error(e); }
     }
     showToast(`"${nome}" removido`, "🗑️");
@@ -685,12 +724,10 @@ function renderizarModalReposicao() {
 
   container.innerHTML = "";
 
-  // Ordena por nome do produto pra ficar mais fácil de seguir no depósito
-  const ids = Object.keys(estado.reposicao);
-  const itens = ids
+  // Segue a ordem em que os produtos foram selecionados
+  const itens = idsReposicaoOrdenados()
     .map(id => estado.todosProdutos.find(p => p.id === id))
-    .filter(p => p)
-    .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
+    .filter(p => p);
 
   itens.forEach((produto, index) => {
     const estoque    = Number(produto.quantidade) || 0;
@@ -731,8 +768,10 @@ function renderizarModalReposicao() {
 
     div.querySelector(".item-reposicao-remover").addEventListener("click", async () => {
       // Atualização otimista
-      const qtdAnterior = estado.reposicao[produto.id];
+      const qtdAnterior   = estado.reposicao[produto.id];
+      const ordemAnterior = [...estado.ordemReposicao];
       delete estado.reposicao[produto.id];
+      estado.ordemReposicao = estado.ordemReposicao.filter(x => x !== produto.id);
       atualizarBannerReposicao();
       atualizarCheckboxesVisuais();
 
@@ -750,6 +789,7 @@ function renderizarModalReposicao() {
       } catch (err) {
         // Reverte em caso de erro
         estado.reposicao[produto.id] = qtdAnterior;
+        estado.ordemReposicao = ordemAnterior;
         atualizarBannerReposicao();
         atualizarCheckboxesVisuais();
         showToast("Erro ao remover item", "❌");
@@ -808,12 +848,11 @@ function imprimirLista() {
   });
   dataEl.textContent = `Gerada em ${dataFmt}`;
 
-  // Monta a tabela
+  // Monta a tabela (na ordem em que foram selecionados)
   corpo.innerHTML = "";
-  const itens = Object.keys(estado.reposicao)
+  const itens = idsReposicaoOrdenados()
     .map(id => estado.todosProdutos.find(p => p.id === id))
-    .filter(p => p)
-    .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
+    .filter(p => p);
 
   itens.forEach((produto, index) => {
     const estoque = Number(produto.quantidade) || 0;
@@ -837,10 +876,9 @@ function imprimirLista() {
 
 // ── Compartilhar lista ────────────────────────────────────────────
 async function compartilharLista() {
-  const itens = Object.keys(estado.reposicao)
+  const itens = idsReposicaoOrdenados()
     .map(id => estado.todosProdutos.find(p => p.id === id))
-    .filter(p => p)
-    .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
+    .filter(p => p);
 
   const agora = new Date();
   const dataFmt = agora.toLocaleDateString("pt-BR", {
@@ -929,12 +967,14 @@ async function finalizarReposicao() {
     // Limpa a lista de reposição no mesmo batch (atomicidade total)
     batch.set(refReposicao(), {
       produtos: {},
+      ordem: [],
       atualizadoEm: serverTimestamp()
     });
     await batch.commit();
 
     // Atualiza estado local imediatamente (listener confirmará depois)
     estado.reposicao = {};
+    estado.ordemReposicao = [];
     atualizarBannerReposicao();
     atualizarCheckboxesVisuais();
 
@@ -958,13 +998,15 @@ async function limparReposicao() {
   if (!confirm("Limpar toda a lista de reposição?")) return;
 
   // Backup pra reverter em caso de erro
-  const backup = { ...estado.reposicao };
+  const backup      = { ...estado.reposicao };
+  const backupOrdem = [...estado.ordemReposicao];
 
   // Marca como ação local pra o listener não disparar o toast de outro dispositivo
   estado.finalizandoLocal = true;
 
   // Atualização otimista
   estado.reposicao = {};
+  estado.ordemReposicao = [];
   atualizarBannerReposicao();
   atualizarCheckboxesVisuais();
   fecharModal("modalReposicao");
@@ -976,6 +1018,7 @@ async function limparReposicao() {
     // Reverte em caso de erro
     estado.finalizandoLocal = false;
     estado.reposicao = backup;
+    estado.ordemReposicao = backupOrdem;
     atualizarBannerReposicao();
     atualizarCheckboxesVisuais();
     showToast("Erro ao limpar lista", "❌");
