@@ -30,6 +30,25 @@ const BARCODE_FORMATS      = ["ean_13","ean_8","code_128","code_39","qr_code","u
 const REPOS_COLLECTION = "config";
 const REPOS_DOC_ID     = "listaReposicao";
 
+// Locais de estoque da papelaria (número → nome)
+const ESTOQUES = {
+  "1": "Sheila",
+  "2": "Palanque",
+  "3": "Restaurante",
+  "4": "Salão"
+};
+
+// Nome do local a partir do código guardado no produto ("" = sem local)
+function nomeEstoque(codigo) {
+  return ESTOQUES[String(codigo)] || "";
+}
+
+// Rótulo completo pra exibição: "2 · Palanque"
+function rotuloEstoque(codigo) {
+  const nome = nomeEstoque(codigo);
+  return nome ? `${codigo} · ${nome}` : "";
+}
+
 // Limpa lixo do localStorage de versões anteriores
 try { localStorage.removeItem("listaReposicao"); } catch {}
 
@@ -41,6 +60,7 @@ const estado = {
   produtoAtual:     { id: null, nome: "", qtd: 0 },
   editarId:         null,
   termoBusca:       "",          // mantém o filtro ativo após alterações
+  filtroEstoque:    "",          // "" = todos | "1".."4" = local | "sem" = sem local
   scannerBusca:     { stream: null, interval: null, ativo: false, zxingReader: null },
   scannerEditar:    { stream: null, interval: null, ativo: false, zxingReader: null },
   scannerAdd:       { stream: null, interval: null, ativo: false, zxingReader: null },
@@ -349,16 +369,8 @@ async function mostrarProdutos() {
       }
     }
 
-    // Reaplicar o filtro ativo (mantém a busca após alterações)
-    if (estado.termoBusca) {
-      const termo = estado.termoBusca.toLowerCase();
-      renderizarLista(estado.todosProdutos.filter(p =>
-        p.nome.toLowerCase().includes(termo) ||
-        (p.codigoBarras && p.codigoBarras.includes(termo))
-      ));
-    } else {
-      renderizarLista(estado.todosProdutos);
-    }
+    // Reaplicar os filtros ativos (mantém busca e filtro de local após alterações)
+    renderizarLista(produtosFiltrados());
 
     atualizarBannerReposicao();
   } catch (err) {
@@ -394,6 +406,10 @@ function renderizarLista(produtos) {
       ? `<span class="barcode-tag" title="Código de barras">⬛ ${produto.codigoBarras}</span>`
       : "";
 
+    const localTag = nomeEstoque(produto.estoque)
+      ? `<span class="estoque-tag estoque-tag-${produto.estoque}" title="Local no estoque">📍 ${rotuloEstoque(produto.estoque)}</span>`
+      : "";
+
     const marcado     = estado.reposicao[produto.id] !== undefined;
     const checkAtivo  = marcado ? "ativo" : "";
     const liMarcado   = marcado ? "produto-marcado" : "";
@@ -418,7 +434,7 @@ function renderizarLista(produtos) {
               aria-label="Quantidade: ${quantidade}${ariaEstoque}">
           Quantidade: ${estoqueLabel}
         </span>
-        ${barcodeTag}
+        <span class="produto-tags">${barcodeTag}${localTag}</span>
       </div>
       <div class="acoes">
         <button class="btn-acao btn-mais"      title="Adicionar 1"        aria-label="Adicionar 1 unidade de ${produto.nome}">+</button>
@@ -440,7 +456,7 @@ function renderizarLista(produtos) {
       abrirModalRemoverQtd(produto.id, produto.nome, quantidade)
     );
     li.querySelector(".btn-editar").addEventListener("click", () =>
-      abrirModalEditar(produto.id, produto.nome, produto.codigoBarras || "")
+      abrirModalEditar(produto.id, produto.nome, produto.codigoBarras || "", produto.estoque || "")
     );
     li.querySelector(".btn-remover").addEventListener("click", () =>
       confirmarRemover(produto.id, produto.nome)
@@ -457,20 +473,51 @@ function renderizarLista(produtos) {
 
 window.mostrarProdutos = mostrarProdutos;
 
+// Aplica os dois filtros (busca + local de estoque) sobre a lista completa
+function produtosFiltrados() {
+  const termo  = estado.termoBusca;
+  const filtro = estado.filtroEstoque;
+
+  return estado.todosProdutos.filter(p => {
+    // Filtro por local de estoque
+    if (filtro === "sem") {
+      if (nomeEstoque(p.estoque)) return false;
+    } else if (filtro) {
+      if (String(p.estoque || "") !== filtro) return false;
+    }
+
+    // Filtro por termo de busca (nome ou código de barras)
+    if (termo) {
+      const casaNome    = p.nome.toLowerCase().includes(termo);
+      const casaCodigo  = p.codigoBarras && p.codigoBarras.includes(termo);
+      if (!casaNome && !casaCodigo) return false;
+    }
+
+    return true;
+  });
+}
+
 window.filtrarProdutos = function () {
-  const termo = document.getElementById("campoBusca").value.trim().toLowerCase();
-  estado.termoBusca = termo;
-  if (!termo) { renderizarLista(estado.todosProdutos); return; }
-  renderizarLista(estado.todosProdutos.filter(p =>
-    p.nome.toLowerCase().includes(termo) ||
-    (p.codigoBarras && p.codigoBarras.includes(termo))
-  ));
+  estado.termoBusca = document.getElementById("campoBusca").value.trim().toLowerCase();
+  renderizarLista(produtosFiltrados());
 };
+
+// Troca o filtro de local ativo e re-renderiza
+function aplicarFiltroEstoque(valor) {
+  estado.filtroEstoque = valor;
+
+  document.querySelectorAll(".chip-estoque").forEach(chip => {
+    chip.classList.toggle("ativo", chip.dataset.estoque === valor);
+  });
+
+  renderizarLista(produtosFiltrados());
+}
 
 window.adicionarProduto = async function () {
   const nome         = document.getElementById("nomeProduto").value.trim();
   const quantidade   = parseInt(document.getElementById("quantidadeProduto").value);
   const codigoBarras = document.getElementById("codigoBarrasProduto").value.trim();
+  const estoqueLocal = document.getElementById("estoqueProduto").value;
   const btn          = document.getElementById("btnAdicionar");
   const spinner      = document.getElementById("btnSpinner");
   const btnText      = document.getElementById("btnText");
@@ -512,12 +559,14 @@ window.adicionarProduto = async function () {
       nome,
       quantidade,
       imagem: estado.imagemBase64 || "",
-      codigoBarras: codigoBarras || ""
+      codigoBarras: codigoBarras || "",
+      estoque: estoqueLocal || ""
     });
 
     document.getElementById("nomeProduto").value         = "";
     document.getElementById("quantidadeProduto").value   = "";
     document.getElementById("codigoBarrasProduto").value = "";
+    document.getElementById("estoqueProduto").value      = "";
     pararScannerGenerico(estado.scannerAdd, "scannerAreaAdd", "btnScanAdd");
     resetUpload();
     showToast(`"${nome}" adicionado ao estoque!`);
@@ -613,10 +662,11 @@ async function confirmarAjusteQtd(tipo) {
 }
 
 // ── Editar produto ────────────────────────────────────────────────
-function abrirModalEditar(id, nomeAtual, barcodeAtual = "") {
+function abrirModalEditar(id, nomeAtual, barcodeAtual = "", estoqueAtual = "") {
   estado.editarId = id;
   document.getElementById("inputEditarNome").value    = nomeAtual;
   document.getElementById("inputEditarBarcode").value = barcodeAtual;
+  document.getElementById("inputEditarEstoque").value = estoqueAtual || "";
   pararScannerGenerico(estado.scannerEditar, "scannerAreaEditar", "btnScanEditar");
   abrirModal("modalEditar");
   setTimeout(() => document.getElementById("inputEditarNome").focus(), 100);
@@ -630,6 +680,7 @@ window.fecharModalEditar = function () {
 window.salvarEdicao = async function () {
   const novoNome    = document.getElementById("inputEditarNome").value.trim();
   const novoBarcode = document.getElementById("inputEditarBarcode").value.trim();
+  const novoEstoque = document.getElementById("inputEditarEstoque").value;
 
   if (!novoNome) { showToast("Digite um nome válido", "⚠️"); return; }
 
@@ -646,7 +697,8 @@ window.salvarEdicao = async function () {
   try {
     await updateDoc(doc(window.db, "produtos", estado.editarId), {
       nome: novoNome,
-      codigoBarras: novoBarcode
+      codigoBarras: novoBarcode,
+      estoque: novoEstoque || ""
     });
     fecharModal("modalEditar");
     showToast(`"${novoNome}" atualizado!`);
@@ -738,6 +790,10 @@ function renderizarModalReposicao() {
     const estoqueLbl = estoqueBx ? `⚠️ ${estoque} un` : `${estoque} un`;
     const estoqueCss = estoqueBx ? "estoque-baixo" : "";
 
+    const localTag = nomeEstoque(produto.estoque)
+      ? `<span class="estoque-tag estoque-tag-${produto.estoque}">📍 ${rotuloEstoque(produto.estoque)}</span>`
+      : `<span class="estoque-tag estoque-tag-sem">📍 sem local</span>`;
+
     const div = document.createElement("div");
     div.className = "item-reposicao";
     div.innerHTML = `
@@ -749,6 +805,7 @@ function renderizarModalReposicao() {
         <div class="item-reposicao-info">
           <div class="item-reposicao-nome">${produto.nome}</div>
           <div class="item-reposicao-codigo">${barcode}</div>
+          <div class="item-reposicao-local">${localTag}</div>
         </div>
         <button class="item-reposicao-remover" title="Remover da lista"
                 aria-label="Remover ${produto.nome} da lista">✕</button>
@@ -858,11 +915,13 @@ function imprimirLista() {
     const estoque = Number(produto.quantidade) || 0;
     const aLevar  = estado.reposicao[produto.id];
     const barcode = produto.codigoBarras || "—";
+    const local   = rotuloEstoque(produto.estoque) || "—";
 
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td>${index + 1}</td>
       <td>${produto.nome}</td>
+      <td>${local}</td>
       <td>${barcode}</td>
       <td>${estoque}</td>
       <td><strong>${aLevar}</strong></td>
@@ -891,7 +950,9 @@ async function compartilharLista() {
     const estoque = Number(produto.quantidade) || 0;
     const aLevar  = estado.reposicao[produto.id];
     const barcode = produto.codigoBarras ? ` (${produto.codigoBarras})` : "";
-    texto += `${index + 1}. *${produto.nome}*${barcode}\n   Estoque: ${estoque} un · *Levar: ${aLevar} un*\n\n`;
+    const local   = rotuloEstoque(produto.estoque);
+    const linhaLocal = local ? `   📍 ${local}\n` : "";
+    texto += `${index + 1}. *${produto.nome}*${barcode}\n${linhaLocal}   Estoque: ${estoque} un · *Levar: ${aLevar} un*\n\n`;
   });
   texto += "_Estoque da Papelaria_";
 
@@ -1132,6 +1193,12 @@ window.alternarScannerBusca = async function () {
       campo.value = codigo;
       estado.termoBusca = codigo.toLowerCase();
 
+      // Limpa o filtro de local pra não esconder o produto escaneado
+      estado.filtroEstoque = "";
+      document.querySelectorAll(".chip-estoque").forEach(chip => {
+        chip.classList.toggle("ativo", chip.dataset.estoque === "");
+      });
+
       const encontrados = estado.todosProdutos.filter(p =>
         p.codigoBarras && p.codigoBarras.includes(codigo)
       );
@@ -1218,6 +1285,11 @@ document.getElementById("campoBusca").addEventListener("keydown", (e) => {
   }
 });
 document.getElementById("btnBuscaCam").addEventListener("click", window.alternarScannerBusca);
+
+// Chips de filtro por local de estoque
+document.querySelectorAll(".chip-estoque").forEach(chip => {
+  chip.addEventListener("click", () => aplicarFiltroEstoque(chip.dataset.estoque));
+});
 
 document.getElementById("modalFoto").addEventListener("click", () => fecharModal("modalFoto"));
 document.querySelector("#modalFoto .modal-foto-box").addEventListener("click", (e) => e.stopPropagation());

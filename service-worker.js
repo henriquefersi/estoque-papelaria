@@ -1,4 +1,4 @@
-const CACHE_NAME = 'papelaria-v9';
+const CACHE_NAME = 'papelaria-v10';
 
 const ASSETS_TO_CACHE = [
   './',

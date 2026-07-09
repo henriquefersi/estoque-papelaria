@@ -1286,3 +1286,152 @@ ul { list-style: none; padding: 0; }
     padding: 22px 18px;
   }
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   LOCAL DE ESTOQUE (Sheila / Palanque / Restaurante / Salão)
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── Select de local (formulário e modal de editar) ── */
+.select-estoque {
+  width: 100%;
+  padding: 13px 16px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text);
+  font-family: 'DM Sans', sans-serif;
+  font-size: 15px;
+  outline: none;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%238888aa' d='M1 1l5 5 5-5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 16px center;
+  padding-right: 40px;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.select-estoque:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(124,106,247,0.15);
+}
+
+.select-estoque option {
+  background: var(--surface2);
+  color: var(--text);
+}
+
+/* ── Chips de filtro por local ── */
+.filtros-estoque {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-bottom: 16px;
+}
+
+.chip-estoque {
+  padding: 7px 13px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 100px;
+  color: var(--text-muted);
+  font-family: 'DM Sans', sans-serif;
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.18s, color 0.18s, border-color 0.18s, transform 0.1s;
+}
+
+.chip-estoque:hover {
+  border-color: rgba(124,106,247,0.4);
+  color: var(--text);
+}
+
+.chip-estoque:active {
+  transform: scale(0.96);
+}
+
+.chip-estoque.ativo {
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  border-color: transparent;
+  color: #fff;
+  font-weight: 700;
+}
+
+/* ── Tag de local no card do produto ── */
+.produto-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  align-items: center;
+}
+
+.estoque-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  border-radius: 6px;
+  padding: 2px 7px;
+  margin-top: 5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* Uma cor por local, pra bater o olho e reconhecer */
+.estoque-tag-1 { color: #7dd3fc; background: rgba(125,211,252,0.10); border: 1px solid rgba(125,211,252,0.25); }
+.estoque-tag-2 { color: #fbbf24; background: rgba(251,191,36,0.10);  border: 1px solid rgba(251,191,36,0.25); }
+.estoque-tag-3 { color: #34d399; background: rgba(52,211,153,0.10);  border: 1px solid rgba(52,211,153,0.25); }
+.estoque-tag-4 { color: #f472b6; background: rgba(244,114,182,0.10); border: 1px solid rgba(244,114,182,0.25); }
+.estoque-tag-sem {
+  color: var(--text-muted);
+  background: rgba(255,255,255,0.03);
+  border: 1px dashed var(--border);
+  font-weight: 500;
+}
+
+/* ── Tag de local dentro do modal de reposição ── */
+.item-reposicao-local {
+  margin-top: 3px;
+}
+
+.item-reposicao-local .estoque-tag {
+  margin-top: 0;
+  font-size: 10.5px;
+}
+
+/* ── Impressão: ajustes para a coluna de local ── */
+@media print {
+  .filtros-estoque { display: none !important; }
+
+  .area-impressao td:nth-child(1) { width: 30px; text-align: center; }
+  .area-impressao td:nth-child(3) { white-space: nowrap; }
+  .area-impressao td:nth-child(5),
+  .area-impressao td:nth-child(6) { text-align: center; }
+  .area-impressao th:nth-child(5),
+  .area-impressao th:nth-child(6) { text-align: center; }
+  /* Reset das regras antigas (4 e 5 já não são mais Estoque/Levar) */
+  .area-impressao td:nth-child(4) { text-align: left; }
+  .area-impressao th:nth-child(4) { text-align: left; }
+}
+
+/* ── Responsivo dos chips ── */
+@media (max-width: 500px) {
+  .filtros-estoque {
+    gap: 6px;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    padding-bottom: 4px;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .filtros-estoque::-webkit-scrollbar { display: none; }
+
+  .chip-estoque {
+    font-size: 12px;
+    padding: 6px 11px;
+    flex-shrink: 0;
+  }
+}

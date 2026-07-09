@@ -47,6 +47,14 @@
         <button class="btn-scan" id="btnScanEditar" title="Usar câmera">📷</button>
       </div>
 
+      <select id="inputEditarEstoque" class="select-estoque">
+        <option value="">📍 Sem local definido</option>
+        <option value="1">1 · Sheila</option>
+        <option value="2">2 · Palanque</option>
+        <option value="3">3 · Restaurante</option>
+        <option value="4">4 · Salão</option>
+      </select>
+
       <div id="scannerAreaEditar" style="display:none">
         <video id="scannerVideoEditar" autoplay playsinline muted
                style="width:100%;border-radius:10px;margin-top:4px;max-height:200px;object-fit:cover;background:#000"></video>
@@ -126,6 +134,7 @@
         <tr>
           <th>#</th>
           <th>Produto</th>
+          <th>Local</th>
           <th>Cód. Barras</th>
           <th>Estoque</th>
           <th>Levar</th>
@@ -211,6 +220,14 @@
           <p class="scan-hint">Aponte a câmera para o código de barras</p>
         </div>
 
+        <select id="estoqueProduto" class="select-estoque">
+          <option value="">📍 Local no estoque (opcional)</option>
+          <option value="1">1 · Sheila</option>
+          <option value="2">2 · Palanque</option>
+          <option value="3">3 · Restaurante</option>
+          <option value="4">4 · Salão</option>
+        </select>
+
         <div class="upload-area" id="uploadArea">
           <input type="file" id="fileInput" accept="image/*">
           <div class="upload-placeholder">
@@ -248,6 +265,16 @@
     <!-- Lista -->
     <div class="card">
       <h2>Produtos no Estoque</h2>
+
+      <div class="filtros-estoque" id="filtrosEstoque">
+        <button class="chip-estoque ativo" data-estoque="">Todos</button>
+        <button class="chip-estoque" data-estoque="1">1 · Sheila</button>
+        <button class="chip-estoque" data-estoque="2">2 · Palanque</button>
+        <button class="chip-estoque" data-estoque="3">3 · Restaurante</button>
+        <button class="chip-estoque" data-estoque="4">4 · Salão</button>
+        <button class="chip-estoque" data-estoque="sem">Sem local</button>
+      </div>
+
       <ul id="listaProdutos"></ul>
     </div>
 
