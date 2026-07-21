@@ -1435,3 +1435,88 @@ ul { list-style: none; padding: 0; }
     flex-shrink: 0;
   }
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   SELETOR DE LOJA (listas de reposição separadas por loja)
+   ═══════════════════════════════════════════════════════════════ */
+
+.seletor-loja {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 12px 14px;
+  margin-bottom: 14px;
+  background: linear-gradient(135deg, rgba(124,106,247,0.10), rgba(192,132,252,0.06));
+  border: 1px solid rgba(124,106,247,0.22);
+  border-radius: 12px;
+}
+
+.seletor-loja-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.seletor-loja-botoes {
+  display: flex;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+
+.chip-loja {
+  flex: 1;
+  padding: 9px 14px;
+  background: var(--surface2);
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+  color: var(--text-muted);
+  font-family: 'DM Sans', sans-serif;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.18s, color 0.18s, border-color 0.18s, transform 0.1s;
+}
+
+.chip-loja:hover {
+  border-color: rgba(124,106,247,0.45);
+  color: var(--text);
+}
+
+.chip-loja:active {
+  transform: scale(0.97);
+}
+
+.chip-loja.ativo {
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  border-color: transparent;
+  color: #fff;
+  font-weight: 700;
+  box-shadow: 0 4px 14px rgba(124,106,247,0.35);
+}
+
+/* Badge da loja dentro do modal de reposição */
+.reposicao-loja-badge {
+  display: inline-block;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  color: #fff;
+  font-weight: 700;
+  font-size: 12px;
+  padding: 2px 9px;
+  border-radius: 100px;
+  margin-right: 4px;
+}
+
+/* Responsivo do seletor de loja */
+@media (max-width: 500px) {
+  .seletor-loja {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+  .seletor-loja-label { text-align: center; }
+  .chip-loja { padding: 10px; }
+}

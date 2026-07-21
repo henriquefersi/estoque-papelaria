@@ -26,9 +26,28 @@ const SCANNER_INTERVALO_MS = 500;
 const BARCODE_FORMATS      = ["ean_13","ean_8","code_128","code_39","qr_code","upc_a","upc_e"];
 
 // Caminho do documento da lista de reposição no Firestore
-// Estrutura: config/listaReposicao = { produtos: {[id]: qtd}, atualizadoEm: ts }
+// Estrutura: config/listaReposicao_<loja> = { produtos: {[id]: qtd}, ordem: [...], atualizadoEm: ts }
+// Cada loja tem seu próprio documento, para as listas não se misturarem.
 const REPOS_COLLECTION = "config";
-const REPOS_DOC_ID     = "listaReposicao";
+
+// Lojas que compartilham o mesmo depósito, mas têm listas de reposição separadas
+const LOJAS = [
+  { id: "orionth", nome: "Orion TH" },
+  { id: "orion",   nome: "Orion" }
+];
+const LOJA_PADRAO   = "orionth";
+const STORAGE_LOJA  = "lojaAtiva";   // guarda a loja ativa por dispositivo
+
+// ID do documento da lista de reposição de uma loja
+function docReposicaoId(lojaId) {
+  return `listaReposicao_${lojaId}`;
+}
+
+// Nome de exibição da loja
+function nomeLoja(lojaId) {
+  const l = LOJAS.find(x => x.id === lojaId);
+  return l ? l.nome : lojaId;
+}
 
 // Locais de estoque da papelaria (número → nome)
 const ESTOQUES = {
@@ -71,8 +90,23 @@ const estado = {
   // Flag para distinguir limpeza/finalização LOCAL de REMOTA (outro dispositivo)
   finalizandoLocal: false,
   // Flag pra saber se o listener da reposição já foi iniciado
-  listenerReposicaoAtivo: false
+  listenerReposicaoAtivo: false,
+  // Loja ativa no momento (cada loja tem sua própria lista de reposição)
+  lojaAtiva:        carregarLojaAtiva(),
+  // Loja para a qual o listener atual está apontando
+  lojaListener:     null,
+  // Função para cancelar o listener atual (ao trocar de loja)
+  unsubReposicao:   null
 };
+
+// Lê a loja ativa salva neste dispositivo (ou usa a padrão)
+function carregarLojaAtiva() {
+  try {
+    const salva = localStorage.getItem(STORAGE_LOJA);
+    if (salva && LOJAS.some(l => l.id === salva)) return salva;
+  } catch {}
+  return LOJA_PADRAO;
+}
 
 // ── Elementos do DOM ─────────────────────────────────────────────
 const lista   = document.getElementById("listaProdutos");
@@ -106,15 +140,25 @@ function fecharModal(id) {
 // ── Lista de Reposição: sincronização com Firestore ─────────────
 // Referência do documento da lista
 function refReposicao() {
-  return doc(window.db, REPOS_COLLECTION, REPOS_DOC_ID);
+  return doc(window.db, REPOS_COLLECTION, docReposicaoId(estado.lojaAtiva));
 }
 
-// Inicia o listener em tempo real (chamado uma vez após login)
-function iniciarListenerReposicao() {
-  if (estado.listenerReposicaoAtivo) return;
-  estado.listenerReposicaoAtivo = true;
+// Inicia (ou reinicia) o listener em tempo real da loja ativa.
+// Se já houver um listener ativo para a mesma loja, não faz nada.
+function iniciarListenerReposicao(forcar = false) {
+  if (!forcar && estado.listenerReposicaoAtivo && estado.lojaListener === estado.lojaAtiva) {
+    return;
+  }
 
-  onSnapshot(refReposicao(), (snap) => {
+  // Cancela o listener anterior, se houver (ao trocar de loja)
+  if (estado.unsubReposicao) {
+    estado.unsubReposicao();
+    estado.unsubReposicao = null;
+  }
+  estado.listenerReposicaoAtivo = true;
+  estado.lojaListener = estado.lojaAtiva;
+
+  estado.unsubReposicao = onSnapshot(refReposicao(), (snap) => {
     const dados         = snap.exists() ? snap.data() : {};
     const novaReposicao = dados.produtos || {};
 
@@ -145,6 +189,42 @@ function iniciarListenerReposicao() {
     }
   }, (err) => {
     console.error("Erro no listener da lista de reposição:", err);
+  });
+}
+
+// Troca a loja ativa: salva, recria o listener e atualiza a interface
+function trocarLoja(lojaId) {
+  if (lojaId === estado.lojaAtiva) return;
+  if (!LOJAS.some(l => l.id === lojaId)) return;
+
+  estado.lojaAtiva = lojaId;
+  try { localStorage.setItem(STORAGE_LOJA, lojaId); } catch {}
+
+  // Zera o estado local da lista (o listener da nova loja vai preencher)
+  estado.reposicao     = {};
+  estado.ordemReposicao = [];
+
+  // Fecha o modal se estiver aberto (a lista mudou de contexto)
+  fecharModal("modalReposicao");
+
+  atualizarBotoesLoja();
+  atualizarBannerReposicao();
+  atualizarCheckboxesVisuais();
+
+  // Reinicia o listener apontando para o documento da nova loja
+  iniciarListenerReposicao(true);
+
+  showToast(`Lista da loja ${nomeLoja(lojaId)}`, "🏬");
+}
+
+// Atualiza o destaque visual dos botões de loja
+function atualizarBotoesLoja() {
+  document.querySelectorAll(".chip-loja").forEach(btn => {
+    btn.classList.toggle("ativo", btn.dataset.loja === estado.lojaAtiva);
+  });
+  // Atualiza rótulos que mostram a loja ativa
+  document.querySelectorAll(".loja-ativa-nome").forEach(el => {
+    el.textContent = nomeLoja(estado.lojaAtiva);
   });
 }
 
@@ -199,7 +279,10 @@ function totalProdutosReposicao() {
 function atualizarBannerReposicao() {
   const banner = document.getElementById("bannerReposicao");
   const sub    = document.getElementById("bannerReposicaoSub");
+  const titulo = document.getElementById("bannerReposicaoTitulo");
   const total  = totalProdutosReposicao();
+
+  if (titulo) titulo.textContent = `Lista · ${nomeLoja(estado.lojaAtiva)}`;
 
   if (total === 0) {
     banner.style.display = "none";
@@ -740,12 +823,25 @@ async function remover(id, nome) {
   showLoading("Removendo produto...");
   try {
     await deleteDoc(doc(window.db, "produtos", id));
-    // Limpa da reposição se estiver lá (local + Firestore)
+
+    // Remove o produto das listas de reposição de TODAS as lojas
+    // (senão ficaria um item fantasma na lista da outra loja)
+    for (const loja of LOJAS) {
+      try {
+        await setDoc(doc(window.db, REPOS_COLLECTION, docReposicaoId(loja.id)), {
+          produtos: { [id]: deleteField() },
+          ordem: arrayRemove(id),
+          atualizadoEm: serverTimestamp()
+        }, { merge: true });
+      } catch (e) { console.error(`Erro ao limpar produto da loja ${loja.id}:`, e); }
+    }
+
+    // Atualiza o estado local da loja ativa
     if (estado.reposicao[id] !== undefined) {
       delete estado.reposicao[id];
       estado.ordemReposicao = estado.ordemReposicao.filter(x => x !== id);
-      try { await removerItemReposicao(id); } catch (e) { console.error(e); }
     }
+
     showToast(`"${nome}" removido`, "🗑️");
     await mostrarProdutos();
   } catch (err) {
@@ -770,9 +866,10 @@ function renderizarModalReposicao() {
   const info      = document.getElementById("reposicaoInfo");
   const total     = totalProdutosReposicao();
 
-  info.textContent = total === 1
+  const totalTxt = total === 1
     ? "1 produto para buscar no depósito"
     : `${total} produtos para buscar no depósito`;
+  info.innerHTML = `<span class="reposicao-loja-badge">🏬 ${nomeLoja(estado.lojaAtiva)}</span> ${totalTxt}`;
 
   container.innerHTML = "";
 
@@ -896,6 +993,9 @@ function renderizarModalReposicao() {
 function imprimirLista() {
   const corpo  = document.getElementById("corpoImpressao");
   const dataEl = document.getElementById("impressaoData");
+  const tituloEl = document.getElementById("impressaoTitulo");
+
+  if (tituloEl) tituloEl.textContent = `🛒 Lista de Reposição · ${nomeLoja(estado.lojaAtiva)}`;
 
   // Formata data atual em pt-BR
   const agora = new Date();
@@ -903,7 +1003,7 @@ function imprimirLista() {
     day: "2-digit", month: "2-digit", year: "numeric",
     hour: "2-digit", minute: "2-digit"
   });
-  dataEl.textContent = `Gerada em ${dataFmt}`;
+  dataEl.textContent = `Loja ${nomeLoja(estado.lojaAtiva)} · Gerada em ${dataFmt}`;
 
   // Monta a tabela (na ordem em que foram selecionados)
   corpo.innerHTML = "";
@@ -945,7 +1045,7 @@ async function compartilharLista() {
     hour: "2-digit", minute: "2-digit"
   });
 
-  let texto = `🛒 *Lista de Reposição*\n_Gerada em ${dataFmt}_\n\n`;
+  let texto = `🛒 *Lista de Reposição · ${nomeLoja(estado.lojaAtiva)}*\n_Gerada em ${dataFmt}_\n\n`;
   itens.forEach((produto, index) => {
     const estoque = Number(produto.quantidade) || 0;
     const aLevar  = estado.reposicao[produto.id];
@@ -1290,6 +1390,12 @@ document.getElementById("btnBuscaCam").addEventListener("click", window.alternar
 document.querySelectorAll(".chip-estoque").forEach(chip => {
   chip.addEventListener("click", () => aplicarFiltroEstoque(chip.dataset.estoque));
 });
+
+// Botões de troca de loja
+document.querySelectorAll(".chip-loja").forEach(btn => {
+  btn.addEventListener("click", () => trocarLoja(btn.dataset.loja));
+});
+atualizarBotoesLoja();
 
 document.getElementById("modalFoto").addEventListener("click", () => fecharModal("modalFoto"));
 document.querySelector("#modalFoto .modal-foto-box").addEventListener("click", (e) => e.stopPropagation());
