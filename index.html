@@ -47,12 +47,9 @@
         <button class="btn-scan" id="btnScanEditar" title="Usar câmera">📷</button>
       </div>
 
+      <!-- Opções geradas dinamicamente pelo script -->
       <select id="inputEditarEstoque" class="select-estoque">
         <option value="">📍 Sem local definido</option>
-        <option value="1">1 · Sheila</option>
-        <option value="2">2 · Palanque</option>
-        <option value="3">3 · Restaurante</option>
-        <option value="4">4 · Salão</option>
       </select>
 
       <div id="scannerAreaEditar" style="display:none">
@@ -125,6 +122,29 @@
     </div>
   </div>
 
+  <!-- Modal: Gerenciar locais de estoque -->
+  <div class="modal-overlay" id="modalLocais">
+    <div class="modal-box modal-locais-box">
+      <div class="modal-reposicao-header">
+        <h3 class="modal-titulo">⚙️ Locais do Estoque</h3>
+        <button class="modal-fechar-x" id="btnFecharLocais">✕</button>
+      </div>
+
+      <p class="locais-ajuda">
+        Renomeie ou exclua os locais existentes. O número ao lado mostra
+        quantos produtos estão guardados em cada um.
+      </p>
+
+      <div id="listaLocais" class="lista-locais"></div>
+
+      <div class="novo-local">
+        <span class="novo-local-num" id="proximoNumeroLocal">5</span>
+        <input type="text" id="inputNovoLocal" placeholder="Nome do novo local">
+        <button class="btn-criar-local" id="btnCriarLocal">Criar</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Área de impressão (oculta na tela, aparece só ao imprimir) -->
   <div id="areaImpressao" class="area-impressao">
     <h1 id="impressaoTitulo">🛒 Lista de Reposição</h1>
@@ -133,6 +153,7 @@
       <thead>
         <tr>
           <th>#</th>
+          <th>Foto</th>
           <th>Produto</th>
           <th>Local</th>
           <th>Cód. Barras</th>
@@ -220,12 +241,9 @@
           <p class="scan-hint">Aponte a câmera para o código de barras</p>
         </div>
 
+        <!-- Opções geradas dinamicamente pelo script -->
         <select id="estoqueProduto" class="select-estoque">
           <option value="">📍 Local no estoque (opcional)</option>
-          <option value="1">1 · Sheila</option>
-          <option value="2">2 · Palanque</option>
-          <option value="3">3 · Restaurante</option>
-          <option value="4">4 · Salão</option>
         </select>
 
         <div class="upload-area" id="uploadArea">
@@ -274,14 +292,8 @@
         </div>
       </div>
 
-      <div class="filtros-estoque" id="filtrosEstoque">
-        <button class="chip-estoque ativo" data-estoque="">Todos</button>
-        <button class="chip-estoque" data-estoque="1">1 · Sheila</button>
-        <button class="chip-estoque" data-estoque="2">2 · Palanque</button>
-        <button class="chip-estoque" data-estoque="3">3 · Restaurante</button>
-        <button class="chip-estoque" data-estoque="4">4 · Salão</button>
-        <button class="chip-estoque" data-estoque="sem">Sem local</button>
-      </div>
+      <!-- Os botões de filtro são gerados dinamicamente pelo script -->
+      <div class="filtros-estoque" id="filtrosEstoque"></div>
 
       <ul id="listaProdutos"></ul>
     </div>

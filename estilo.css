@@ -1252,11 +1252,6 @@ ul { list-style: none; padding: 0; }
     letter-spacing: 0.5px;
   }
 
-  .area-impressao td:nth-child(1) { width: 32px; text-align: center; }
-  .area-impressao td:nth-child(4),
-  .area-impressao td:nth-child(5) { text-align: center; }
-  .area-impressao th:nth-child(4),
-  .area-impressao th:nth-child(5) { text-align: center; }
 
   .area-impressao tbody tr:nth-child(even) {
     background: #fafafa;
@@ -1381,10 +1376,17 @@ ul { list-style: none; padding: 0; }
 }
 
 /* Uma cor por local, pra bater o olho e reconhecer */
-.estoque-tag-1 { color: #7dd3fc; background: rgba(125,211,252,0.10); border: 1px solid rgba(125,211,252,0.25); }
-.estoque-tag-2 { color: #fbbf24; background: rgba(251,191,36,0.10);  border: 1px solid rgba(251,191,36,0.25); }
-.estoque-tag-3 { color: #34d399; background: rgba(52,211,153,0.10);  border: 1px solid rgba(52,211,153,0.25); }
-.estoque-tag-4 { color: #f472b6; background: rgba(244,114,182,0.10); border: 1px solid rgba(244,114,182,0.25); }
+/* Paleta ciclica: as 4 primeiras mantem as cores originais dos locais */
+.estoque-tag-c1  { color: #7dd3fc; background: rgba(125,211,252,0.10); border: 1px solid rgba(125,211,252,0.25); }
+.estoque-tag-c2  { color: #fbbf24; background: rgba(251,191,36,0.10);  border: 1px solid rgba(251,191,36,0.25); }
+.estoque-tag-c3  { color: #34d399; background: rgba(52,211,153,0.10);  border: 1px solid rgba(52,211,153,0.25); }
+.estoque-tag-c4  { color: #f472b6; background: rgba(244,114,182,0.10); border: 1px solid rgba(244,114,182,0.25); }
+.estoque-tag-c5  { color: #fb923c; background: rgba(251,146,60,0.10);  border: 1px solid rgba(251,146,60,0.25); }
+.estoque-tag-c6  { color: #a78bfa; background: rgba(167,139,250,0.10); border: 1px solid rgba(167,139,250,0.25); }
+.estoque-tag-c7  { color: #2dd4bf; background: rgba(45,212,191,0.10);  border: 1px solid rgba(45,212,191,0.25); }
+.estoque-tag-c8  { color: #f87171; background: rgba(248,113,113,0.10); border: 1px solid rgba(248,113,113,0.25); }
+.estoque-tag-c9  { color: #a3e635; background: rgba(163,230,53,0.10);  border: 1px solid rgba(163,230,53,0.25); }
+.estoque-tag-c10 { color: #e879f9; background: rgba(232,121,249,0.10); border: 1px solid rgba(232,121,249,0.25); }
 .estoque-tag-sem {
   color: var(--text-muted);
   background: rgba(255,255,255,0.03);
@@ -1406,15 +1408,6 @@ ul { list-style: none; padding: 0; }
 @media print {
   .filtros-estoque { display: none !important; }
 
-  .area-impressao td:nth-child(1) { width: 30px; text-align: center; }
-  .area-impressao td:nth-child(3) { white-space: nowrap; }
-  .area-impressao td:nth-child(5),
-  .area-impressao td:nth-child(6) { text-align: center; }
-  .area-impressao th:nth-child(5),
-  .area-impressao th:nth-child(6) { text-align: center; }
-  /* Reset das regras antigas (4 e 5 já não são mais Estoque/Levar) */
-  .area-impressao td:nth-child(4) { text-align: left; }
-  .area-impressao th:nth-child(4) { text-align: left; }
 }
 
 /* ── Responsivo dos chips ── */
@@ -1519,4 +1512,234 @@ ul { list-style: none; padding: 0; }
   }
   .seletor-loja-label { text-align: center; }
   .chip-loja { padding: 10px; }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   GERENCIAR LOCAIS DE ESTOQUE
+   ═══════════════════════════════════════════════════════════════ */
+
+/* Chip de engrenagem que abre o modal */
+.chip-gerenciar {
+  border-style: dashed !important;
+  color: var(--accent2) !important;
+}
+
+.chip-gerenciar:hover {
+  background: rgba(124,106,247,0.12);
+  border-color: var(--accent) !important;
+}
+
+.modal-locais-box {
+  max-width: 460px;
+  max-height: 88vh;
+  overflow-y: auto;
+  gap: 12px;
+}
+
+.locais-ajuda {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.lista-locais {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 46vh;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.locais-vazio {
+  font-size: 13px;
+  color: var(--text-muted);
+  text-align: center;
+  padding: 18px 8px;
+}
+
+/* Linha de um local */
+.item-local {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 10px;
+}
+
+.item-local-num {
+  margin-top: 0 !important;
+  min-width: 26px;
+  justify-content: center;
+  font-size: 12px !important;
+  flex-shrink: 0;
+}
+
+.item-local-nome {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px !important;
+  font-size: 13.5px !important;
+  background: var(--surface) !important;
+  border-radius: 8px !important;
+}
+
+.item-local-uso {
+  font-size: 11px;
+  color: var(--text-muted);
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border);
+  border-radius: 100px;
+  min-width: 24px;
+  text-align: center;
+  padding: 2px 7px;
+  flex-shrink: 0;
+}
+
+.item-local-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 13px;
+  cursor: pointer;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.18s, color 0.18s, border-color 0.18s, transform 0.1s;
+}
+
+.item-local-btn:active { transform: scale(0.92); }
+
+.item-local-salvar:hover {
+  background: rgba(52,211,153,0.15);
+  border-color: rgba(52,211,153,0.35);
+  color: var(--green);
+}
+
+.item-local-excluir:hover {
+  background: rgba(248,113,113,0.15);
+  border-color: rgba(248,113,113,0.35);
+  color: var(--red);
+}
+
+/* Criar local novo */
+.novo-local {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.novo-local-num {
+  min-width: 30px;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent2);
+  background: rgba(124,106,247,0.12);
+  border: 1px dashed rgba(124,106,247,0.35);
+  border-radius: 8px;
+  padding: 6px 4px;
+  flex-shrink: 0;
+}
+
+.novo-local input {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 12px !important;
+  font-size: 13.5px !important;
+}
+
+.btn-criar-local {
+  padding: 10px 16px;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  border: none;
+  border-radius: 10px;
+  color: #fff;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 13.5px;
+  font-weight: 700;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: opacity 0.2s, transform 0.1s;
+}
+
+.btn-criar-local:hover  { opacity: 0.9; }
+.btn-criar-local:active { transform: scale(0.97); }
+.btn-criar-local:disabled { opacity: 0.5; cursor: not-allowed; }
+
+@media (max-width: 500px) {
+  .modal-locais-box { padding: 22px 16px; }
+  .item-local { gap: 6px; padding: 8px; }
+  .item-local-nome { font-size: 13px !important; padding: 7px 9px !important; }
+  .item-local-uso { display: none; }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   IMPRESSÃO — colunas e fotos dos produtos
+   Colunas: 1 #  |  2 Foto  |  3 Produto  |  4 Local  |  5 Cód. Barras
+            6 Estoque  |  7 Levar
+   ═══════════════════════════════════════════════════════════════ */
+
+@media print {
+  /* Miniatura da foto do produto */
+  .img-impressao {
+    width: 38px;
+    height: 38px;
+    object-fit: cover;
+    border-radius: 4px;
+    border: 1px solid #ddd;
+    display: block;
+    margin: 0 auto;
+  }
+
+  /* Espaço reservado quando o produto não tem foto */
+  .img-impressao-vazia {
+    display: block;
+    width: 38px;
+    height: 38px;
+    line-height: 38px;
+    text-align: center;
+    color: #bbb;
+    border: 1px dashed #ddd;
+    border-radius: 4px;
+    margin: 0 auto;
+    font-size: 13px;
+  }
+
+  /* Larguras e alinhamento das colunas */
+  .area-impressao td:nth-child(1),
+  .area-impressao th:nth-child(1) { width: 28px;  text-align: center; }
+  .area-impressao td:nth-child(2),
+  .area-impressao th:nth-child(2) { width: 50px;  text-align: center; padding: 4px; }
+  .area-impressao td:nth-child(3),
+  .area-impressao th:nth-child(3) { text-align: left; }
+  .area-impressao td:nth-child(4),
+  .area-impressao th:nth-child(4) { text-align: left; white-space: nowrap; }
+  .area-impressao td:nth-child(5),
+  .area-impressao th:nth-child(5) { text-align: left; }
+  .area-impressao td:nth-child(6),
+  .area-impressao th:nth-child(6) { width: 62px; text-align: center; }
+  .area-impressao td:nth-child(7),
+  .area-impressao th:nth-child(7) { width: 52px; text-align: center; }
+
+  /* Impede que uma linha seja cortada entre duas páginas */
+  .area-impressao tbody tr {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  /* Garante que as fotos saiam mesmo com "gráficos de fundo" desligado */
+  .area-impressao img {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
 }

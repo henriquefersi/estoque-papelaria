@@ -49,13 +49,23 @@ function nomeLoja(lojaId) {
   return l ? l.nome : lojaId;
 }
 
-// Locais de estoque da papelaria (número → nome)
-const ESTOQUES = {
+// ── Locais de estoque (gerenciáveis pelo app, salvos no Firestore) ──
+// Documento: config/locaisEstoque = { locais: { "1": "Sheila", ... }, atualizadoEm: ts }
+const LOCAIS_DOC_ID = "locaisEstoque";
+
+// Locais iniciais — usados só na primeira vez, se o documento ainda não existir
+const LOCAIS_PADRAO = {
   "1": "Sheila",
   "2": "Palanque",
   "3": "Restaurante",
   "4": "Salão"
 };
+
+// Locais atuais em memória (preenchido pelo listener do Firestore)
+let ESTOQUES = { ...LOCAIS_PADRAO };
+
+// Quantidade de cores disponíveis para as tags (ciclam quando passa disso)
+const TOTAL_CORES_LOCAL = 10;
 
 // Nome do local a partir do código guardado no produto ("" = sem local)
 function nomeEstoque(codigo) {
@@ -66,6 +76,31 @@ function nomeEstoque(codigo) {
 function rotuloEstoque(codigo) {
   const nome = nomeEstoque(codigo);
   return nome ? `${codigo} · ${nome}` : "";
+}
+
+// Classe de cor da tag, derivada do número do local (cicla a paleta)
+function corEstoque(codigo) {
+  const n = parseInt(codigo, 10);
+  if (!n || n < 1) return "sem";
+  return "c" + (((n - 1) % TOTAL_CORES_LOCAL) + 1);
+}
+
+// Números dos locais em ordem crescente
+function codigosEstoqueOrdenados() {
+  return Object.keys(ESTOQUES)
+    .filter(k => ESTOQUES[k])
+    .sort((a, b) => parseInt(a, 10) - parseInt(b, 10));
+}
+
+// Próximo número livre (maior existente + 1)
+function proximoNumeroEstoque() {
+  const nums = Object.keys(ESTOQUES).map(k => parseInt(k, 10)).filter(n => !isNaN(n));
+  return nums.length ? Math.max(...nums) + 1 : 1;
+}
+
+// Quantos produtos estão guardados em determinado local
+function contarProdutosNoLocal(codigo) {
+  return estado.todosProdutos.filter(p => String(p.estoque || "") === String(codigo)).length;
 }
 
 // Limpa lixo do localStorage de versões anteriores
@@ -91,6 +126,8 @@ const estado = {
   finalizandoLocal: false,
   // Flag pra saber se o listener da reposição já foi iniciado
   listenerReposicaoAtivo: false,
+  // Flag pra saber se o listener dos locais de estoque já foi iniciado
+  listenerLocaisAtivo: false,
   // Loja ativa no momento (cada loja tem sua própria lista de reposição)
   lojaAtiva:        carregarLojaAtiva(),
   // Loja para a qual o listener atual está apontando
@@ -226,6 +263,141 @@ function atualizarBotoesLoja() {
   document.querySelectorAll(".loja-ativa-nome").forEach(el => {
     el.textContent = nomeLoja(estado.lojaAtiva);
   });
+}
+
+// ── Locais de estoque: sincronização com Firestore ───────────────
+function refLocais() {
+  return doc(window.db, REPOS_COLLECTION, LOCAIS_DOC_ID);
+}
+
+// Escuta os locais em tempo real; cria os padrões na primeira vez
+function iniciarListenerLocais() {
+  if (estado.listenerLocaisAtivo) return;
+  estado.listenerLocaisAtivo = true;
+
+  onSnapshot(refLocais(), async (snap) => {
+    if (!snap.exists()) {
+      // Primeira execução: grava os locais padrão
+      try {
+        await setDoc(refLocais(), {
+          locais: LOCAIS_PADRAO,
+          atualizadoEm: serverTimestamp()
+        });
+      } catch (err) {
+        console.error("Erro ao criar locais padrão:", err);
+      }
+      return; // o próprio snapshot seguinte trará os dados
+    }
+
+    const dados = snap.data() || {};
+    ESTOQUES = dados.locais || {};
+
+    // Redesenha tudo que depende dos locais
+    renderizarFiltrosEstoque();
+    renderizarSelectsEstoque();
+    renderizarGerenciarLocais();
+    renderizarLista(produtosFiltrados());
+  }, (err) => {
+    console.error("Erro no listener dos locais:", err);
+  });
+}
+
+// Cria um local novo com o próximo número livre
+async function adicionarLocalEstoque(nome) {
+  const limpo = (nome || "").trim();
+  if (!limpo) {
+    showToast("Digite o nome do local", "⚠️");
+    return false;
+  }
+
+  // Evita nomes repetidos (ignorando maiúsculas/minúsculas)
+  const jaExiste = Object.values(ESTOQUES).some(
+    n => n.trim().toLowerCase() === limpo.toLowerCase()
+  );
+  if (jaExiste) {
+    showToast(`"${limpo}" já existe`, "⚠️");
+    return false;
+  }
+
+  const numero = String(proximoNumeroEstoque());
+  try {
+    await setDoc(refLocais(), {
+      locais: { [numero]: limpo },
+      atualizadoEm: serverTimestamp()
+    }, { merge: true });
+    showToast(`Local "${numero} · ${limpo}" criado`, "✅");
+    return true;
+  } catch (err) {
+    showToast("Erro ao criar local", "❌");
+    console.error(err);
+    return false;
+  }
+}
+
+// Renomeia um local existente (o número não muda)
+async function renomearLocalEstoque(codigo, novoNome) {
+  const limpo = (novoNome || "").trim();
+  if (!limpo) {
+    showToast("O nome não pode ficar vazio", "⚠️");
+    return false;
+  }
+  if (limpo === ESTOQUES[String(codigo)]) return true; // nada mudou
+
+  const jaExiste = Object.entries(ESTOQUES).some(
+    ([k, n]) => k !== String(codigo) && n.trim().toLowerCase() === limpo.toLowerCase()
+  );
+  if (jaExiste) {
+    showToast(`"${limpo}" já existe`, "⚠️");
+    return false;
+  }
+
+  try {
+    await setDoc(refLocais(), {
+      locais: { [String(codigo)]: limpo },
+      atualizadoEm: serverTimestamp()
+    }, { merge: true });
+    showToast(`Renomeado para "${limpo}"`, "✅");
+    return true;
+  } catch (err) {
+    showToast("Erro ao renomear", "❌");
+    console.error(err);
+    return false;
+  }
+}
+
+// Exclui um local — só permite se não houver produtos guardados nele
+async function excluirLocalEstoque(codigo) {
+  const nome  = nomeEstoque(codigo);
+  const usados = contarProdutosNoLocal(codigo);
+
+  if (usados > 0) {
+    alert(
+      `Não dá pra excluir "${codigo} · ${nome}".\n\n` +
+      `${usados} produto(s) ainda estão guardados nesse local.\n\n` +
+      `Mude esses produtos para outro local primeiro (use o filtro "${codigo} · ${nome}" na lista para achá-los).`
+    );
+    return false;
+  }
+
+  if (!confirm(`Excluir o local "${codigo} · ${nome}"?`)) return false;
+
+  try {
+    await setDoc(refLocais(), {
+      locais: { [String(codigo)]: deleteField() },
+      atualizadoEm: serverTimestamp()
+    }, { merge: true });
+
+    // Se o filtro ativo era esse local, volta pra "Todos"
+    if (estado.filtroEstoque === String(codigo)) {
+      estado.filtroEstoque = "";
+    }
+    showToast(`Local "${nome}" excluído`, "🗑️");
+    return true;
+  } catch (err) {
+    showToast("Erro ao excluir local", "❌");
+    console.error(err);
+    return false;
+  }
 }
 
 // Operações de escrita no Firestore
@@ -420,6 +592,7 @@ async function mostrarProdutos() {
 
     // Inicia o listener da lista de reposição (uma única vez por sessão)
     iniciarListenerReposicao();
+    iniciarListenerLocais();
 
     // Limpa da reposição qualquer produto que não existe mais OU que está sem estoque.
     // Como o listener pode ainda não ter chegado, fazemos isso de forma idempotente:
@@ -490,7 +663,7 @@ function renderizarLista(produtos) {
       : "";
 
     const localTag = nomeEstoque(produto.estoque)
-      ? `<span class="estoque-tag estoque-tag-${produto.estoque}" title="Local no estoque">📍 ${rotuloEstoque(produto.estoque)}</span>`
+      ? `<span class="estoque-tag estoque-tag-${corEstoque(produto.estoque)}" title="Local no estoque">📍 ${rotuloEstoque(produto.estoque)}</span>`
       : "";
 
     const marcado     = estado.reposicao[produto.id] !== undefined;
@@ -594,6 +767,139 @@ function aplicarFiltroEstoque(valor) {
   });
 
   renderizarLista(produtosFiltrados());
+}
+
+// ── Renderização dinâmica dos locais ─────────────────────────────
+
+// Botões de filtro por local (Todos + cada local + Sem local)
+function renderizarFiltrosEstoque() {
+  const cont = document.getElementById("filtrosEstoque");
+  if (!cont) return;
+
+  const codigos = codigosEstoqueOrdenados();
+
+  // Se o filtro ativo apontava para um local que não existe mais, volta pra "Todos"
+  if (estado.filtroEstoque && estado.filtroEstoque !== "sem"
+      && !codigos.includes(estado.filtroEstoque)) {
+    estado.filtroEstoque = "";
+  }
+
+  let html = `<button class="chip-estoque${estado.filtroEstoque === "" ? " ativo" : ""}" data-estoque="">Todos</button>`;
+
+  codigos.forEach(cod => {
+    const ativo = estado.filtroEstoque === cod ? " ativo" : "";
+    html += `<button class="chip-estoque${ativo}" data-estoque="${cod}">${cod} · ${ESTOQUES[cod]}</button>`;
+  });
+
+  html += `<button class="chip-estoque${estado.filtroEstoque === "sem" ? " ativo" : ""}" data-estoque="sem">Sem local</button>`;
+  html += `<button class="chip-estoque chip-gerenciar" id="btnGerenciarLocais" title="Adicionar ou editar locais">⚙️ Locais</button>`;
+
+  cont.innerHTML = html;
+
+  // Religa os eventos (o innerHTML apagou os antigos)
+  cont.querySelectorAll(".chip-estoque:not(.chip-gerenciar)").forEach(chip => {
+    chip.addEventListener("click", () => aplicarFiltroEstoque(chip.dataset.estoque));
+  });
+  const btnGer = document.getElementById("btnGerenciarLocais");
+  if (btnGer) btnGer.addEventListener("click", abrirModalLocais);
+}
+
+// Opções dos <select> de local (formulário de novo produto e modal de editar)
+function renderizarSelectsEstoque() {
+  const codigos = codigosEstoqueOrdenados();
+
+  const configs = [
+    { id: "estoqueProduto",    placeholder: "📍 Local no estoque (opcional)" },
+    { id: "inputEditarEstoque", placeholder: "📍 Sem local definido" }
+  ];
+
+  configs.forEach(({ id, placeholder }) => {
+    const sel = document.getElementById(id);
+    if (!sel) return;
+
+    const valorAtual = sel.value; // preserva a seleção durante o redesenho
+
+    let html = `<option value="">${placeholder}</option>`;
+    codigos.forEach(cod => {
+      html += `<option value="${cod}">${cod} · ${ESTOQUES[cod]}</option>`;
+    });
+    sel.innerHTML = html;
+
+    // Restaura a seleção se o local ainda existir
+    sel.value = codigos.includes(valorAtual) ? valorAtual : "";
+  });
+}
+
+// ── Modal: Gerenciar locais ──────────────────────────────────────
+function abrirModalLocais() {
+  renderizarGerenciarLocais();
+  const input = document.getElementById("inputNovoLocal");
+  if (input) input.value = "";
+  abrirModal("modalLocais");
+}
+
+function renderizarGerenciarLocais() {
+  const cont = document.getElementById("listaLocais");
+  if (!cont) return;
+
+  const codigos = codigosEstoqueOrdenados();
+  cont.innerHTML = "";
+
+  if (codigos.length === 0) {
+    cont.innerHTML = `<p class="locais-vazio">Nenhum local cadastrado ainda. Crie o primeiro abaixo. 👇</p>`;
+  }
+
+  codigos.forEach(cod => {
+    const usados = contarProdutosNoLocal(cod);
+    const linha = document.createElement("div");
+    linha.className = "item-local";
+    linha.innerHTML = `
+      <span class="item-local-num estoque-tag estoque-tag-${corEstoque(cod)}">${cod}</span>
+      <input type="text" class="item-local-nome" value="${ESTOQUES[cod].replace(/"/g, "&quot;")}"
+             aria-label="Nome do local ${cod}">
+      <span class="item-local-uso" title="Produtos guardados aqui">${usados}</span>
+      <button class="item-local-btn item-local-salvar" title="Salvar nome">✓</button>
+      <button class="item-local-btn item-local-excluir" title="Excluir local">🗑</button>
+    `;
+
+    const input = linha.querySelector(".item-local-nome");
+
+    linha.querySelector(".item-local-salvar").addEventListener("click", async () => {
+      await renomearLocalEstoque(cod, input.value);
+    });
+
+    input.addEventListener("keydown", async (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        await renomearLocalEstoque(cod, input.value);
+        input.blur();
+      }
+    });
+
+    linha.querySelector(".item-local-excluir").addEventListener("click", async () => {
+      await excluirLocalEstoque(cod);
+    });
+
+    cont.appendChild(linha);
+  });
+
+  // Dica do próximo número
+  const dica = document.getElementById("proximoNumeroLocal");
+  if (dica) dica.textContent = proximoNumeroEstoque();
+}
+
+async function criarLocalPeloModal() {
+  const input = document.getElementById("inputNovoLocal");
+  if (!input) return;
+
+  const btn = document.getElementById("btnCriarLocal");
+  btn.disabled = true;
+
+  const ok = await adicionarLocalEstoque(input.value);
+  if (ok) input.value = "";
+
+  btn.disabled = false;
+  input.focus();
 }
 
 window.adicionarProduto = async function () {
@@ -888,7 +1194,7 @@ function renderizarModalReposicao() {
     const estoqueCss = estoqueBx ? "estoque-baixo" : "";
 
     const localTag = nomeEstoque(produto.estoque)
-      ? `<span class="estoque-tag estoque-tag-${produto.estoque}">📍 ${rotuloEstoque(produto.estoque)}</span>`
+      ? `<span class="estoque-tag estoque-tag-${corEstoque(produto.estoque)}">📍 ${rotuloEstoque(produto.estoque)}</span>`
       : `<span class="estoque-tag estoque-tag-sem">📍 sem local</span>`;
 
     const div = document.createElement("div");
@@ -1017,9 +1323,16 @@ function imprimirLista() {
     const barcode = produto.codigoBarras || "—";
     const local   = rotuloEstoque(produto.estoque) || "—";
 
+    // A foto é base64 guardada no próprio produto, então imprime mesmo offline.
+    // Sem foto, mostra um quadradinho vazio para a coluna não desalinhar.
+    const celulaFoto = produto.imagem
+      ? `<img src="${produto.imagem}" class="img-impressao" alt="">`
+      : `<span class="img-impressao-vazia">—</span>`;
+
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td>${index + 1}</td>
+      <td>${celulaFoto}</td>
       <td>${produto.nome}</td>
       <td>${local}</td>
       <td>${barcode}</td>
@@ -1386,9 +1699,17 @@ document.getElementById("campoBusca").addEventListener("keydown", (e) => {
 });
 document.getElementById("btnBuscaCam").addEventListener("click", window.alternarScannerBusca);
 
-// Chips de filtro por local de estoque
-document.querySelectorAll(".chip-estoque").forEach(chip => {
-  chip.addEventListener("click", () => aplicarFiltroEstoque(chip.dataset.estoque));
+// Os chips de filtro por local são criados dinamicamente em
+// renderizarFiltrosEstoque() — os eventos são ligados lá.
+
+// Modal de gerenciar locais
+document.getElementById("btnFecharLocais").addEventListener("click", () => fecharModal("modalLocais"));
+document.getElementById("btnCriarLocal").addEventListener("click", criarLocalPeloModal);
+document.getElementById("inputNovoLocal").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    criarLocalPeloModal();
+  }
 });
 
 // Botões de troca de loja
@@ -1396,6 +1717,11 @@ document.querySelectorAll(".chip-loja").forEach(btn => {
   btn.addEventListener("click", () => trocarLoja(btn.dataset.loja));
 });
 atualizarBotoesLoja();
+
+// Desenha os locais com os valores padrão enquanto o Firestore não responde
+// (o listener substitui assim que os dados reais chegam)
+renderizarFiltrosEstoque();
+renderizarSelectsEstoque();
 
 document.getElementById("modalFoto").addEventListener("click", () => fecharModal("modalFoto"));
 document.querySelector("#modalFoto .modal-foto-box").addEventListener("click", (e) => e.stopPropagation());
@@ -1431,6 +1757,7 @@ document.addEventListener("keydown", (e) => {
     fecharModal("modalEditar");
     fecharModal("modalRemoverQtd");
     fecharModal("modalReposicao");
+    fecharModal("modalLocais");
     pararScannerGenerico(estado.scannerBusca, "scannerAreaBusca", "btnBuscaCam");
     pararScannerGenerico(estado.scannerAdd, "scannerAreaAdd", "btnScanAdd");
   }
