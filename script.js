@@ -16,7 +16,16 @@ import {
 
 // ZXing: fallback de leitura de código de barras para navegadores
 // que não têm a API nativa BarcodeDetector (ex.: Safari no iPhone).
-import { BrowserMultiFormatReader } from "https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.5/+esm";
+// Importado sob demanda (só quando o scanner é aberto num navegador sem
+// BarcodeDetector) pra não pesar no carregamento inicial da página.
+let _BrowserMultiFormatReader = null;
+async function carregarZXing() {
+  if (!_BrowserMultiFormatReader) {
+    const mod = await import("https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.5/+esm");
+    _BrowserMultiFormatReader = mod.BrowserMultiFormatReader;
+  }
+  return _BrowserMultiFormatReader;
+}
 
 // ── Constantes ───────────────────────────────────────────────────
 const LIMITE_ESTOQUE_BAIXO = 2;
@@ -683,6 +692,7 @@ function renderizarLista(produtos) {
       <img src="${imagem}" class="img-produto"
            alt="Foto de ${produto.nome}"
            title="Clique para ampliar"
+           loading="lazy" decoding="async"
            onerror="this.src='https://placehold.co/52x52/1a1a24/8888aa?text=?'">
       <div class="produto-info">
         <span class="nome-produto">${produto.nome}</span>
@@ -1550,8 +1560,9 @@ async function iniciarScannerGenerico(scannerState, config) {
         } catch (_) {}
       }, SCANNER_INTERVALO_MS);
     } else {
-      // ── Fallback: ZXing (Safari iOS, etc.)
-      const reader = new BrowserMultiFormatReader();
+      // ── Fallback: ZXing (Safari iOS, etc.) — carregado sob demanda
+      const ReaderClass = await carregarZXing();
+      const reader = new ReaderClass();
       scannerState.zxingReader = reader;
       reader.decodeFromStream(scannerState.stream, video, (result, err) => {
         if (result) callback(result.getText());
@@ -1676,8 +1687,20 @@ window.alternarScannerAdd = async function () {
 };
 
 // ── Event Listeners ───────────────────────────────────────────────
+
+// Pequeno atraso antes de filtrar: evita reconstruir a lista inteira
+// a cada tecla digitada (importante com muitas fotos na lista).
+function debounce(fn, atrasoMs) {
+  let timer = null;
+  return (...args) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => fn(...args), atrasoMs);
+  };
+}
+const filtrarProdutosDebounced = debounce(() => window.filtrarProdutos(), 180);
+
 document.getElementById("btnAdicionar").addEventListener("click", window.adicionarProduto);
-document.getElementById("campoBusca").addEventListener("input", window.filtrarProdutos);
+document.getElementById("campoBusca").addEventListener("input", filtrarProdutosDebounced);
 document.getElementById("campoBusca").addEventListener("keydown", (e) => {
   if (e.key === "Enter") {
     e.preventDefault();
