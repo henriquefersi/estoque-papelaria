@@ -315,7 +315,11 @@
   <!-- Firebase -->
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-app.js";
-    import { getFirestore } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-firestore.js";
+    import {
+      initializeFirestore,
+      persistentLocalCache,
+      persistentMultipleTabManager
+    } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-firestore.js";
     import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-auth.js";
 
     const firebaseConfig = {
@@ -328,7 +332,26 @@
     };
 
     const app = initializeApp(firebaseConfig);
-    window.db = getFirestore(app);
+
+    // Cache local (IndexedDB): guarda os produtos no próprio dispositivo.
+    // A partir da 2ª abertura o app lê do cache e só busca na rede o que mudou,
+    // em vez de baixar a coleção inteira toda vez.
+    // persistentMultipleTabManager permite ter o app aberto em várias abas.
+    let dbInstance;
+    try {
+      dbInstance = initializeFirestore(app, {
+        localCache: persistentLocalCache({
+          tabManager: persistentMultipleTabManager()
+        })
+      });
+    } catch (err) {
+      // Se o navegador não suportar IndexedDB (aba anônima antiga, etc.),
+      // cai pro modo normal sem cache — o app continua funcionando.
+      console.warn("Cache local indisponível, seguindo sem ele:", err);
+      dbInstance = initializeFirestore(app, {});
+    }
+
+    window.db = dbInstance;
     window.auth = getAuth(app);
 
     onAuthStateChanged(window.auth, (user) => {
