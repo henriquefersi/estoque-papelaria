@@ -1789,6 +1789,32 @@ window.alternarScannerAdd = async function () {
   });
 };
 
+// Baixa um arquivo JSON com todos os produtos, do jeito que estão agora.
+// Rede de segurança antes da migração. Rode pelo console: baixarBackup()
+window.baixarBackup = async function () {
+  console.log("Baixando todos os produtos do servidor...");
+  const snapshot = await getDocs(collection(window.db, "produtos"));
+
+  const dados = [];
+  snapshot.forEach((d) => dados.push({ id: d.id, ...d.data() }));
+
+  const json = JSON.stringify(dados);
+  const tamanhoMB = (json.length / 1024 / 1024).toFixed(1);
+
+  const data = new Date().toISOString().slice(0, 10);
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([json], { type: "application/json" }));
+  a.download = `backup-produtos-${data}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+
+  console.log(`✅ Backup gerado: ${dados.length} produtos, ~${tamanhoMB} MB.`);
+  console.log("Confira se o arquivo apareceu na pasta Downloads antes de migrar.");
+  return `${dados.length} produtos salvos`;
+};
+
 // ── Migração única: separar fotos antigas ────────────────────────
 // Converte os produtos que ainda guardam a foto grande no campo "imagem":
 //   1. gera a miniatura e grava em "thumb" no próprio produto
