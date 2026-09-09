@@ -12,7 +12,8 @@ import {
   deleteField,
   serverTimestamp,
   arrayUnion,
-  arrayRemove
+  arrayRemove,
+  waitForPendingWrites
 } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-firestore.js";
 
 // ZXing: fallback de leitura de código de barras para navegadores
@@ -1823,7 +1824,12 @@ window.baixarBackup = async function () {
 // Roda pelo console: migrarFotos()
 // É segura de rodar mais de uma vez — pula quem já foi migrado, então se
 // travar no meio ou você fechar a aba, é só rodar de novo que continua.
-window.migrarFotos = async function (concorrencia = 6) {
+//
+// IMPORTANTE: com o cache local ativo, setDoc/updateDoc retornam assim que
+// gravam no IndexedDB, ANTES do servidor confirmar. Por isso processamos em
+// lotes pequenos e usamos waitForPendingWrites() entre eles: assim esperamos
+// o servidor de verdade e a fila de envio do Firestore não estoura.
+window.migrarFotos = async function (tamanhoLote = 10) {
   console.log("Buscando produtos direto do servidor...");
   const snapshot = await getDocs(collection(window.db, "produtos"));
 
@@ -1840,13 +1846,13 @@ window.migrarFotos = async function (concorrencia = 6) {
 
   const total = pendentes.length;
   console.log(`Encontrados ${total} produto(s) para migrar.`);
-  console.log("Pode demorar alguns minutos. Deixe esta aba aberta e em primeiro plano.");
+  console.log("Isso leva vários minutos, e é lento de propósito para não");
+  console.log("sobrecarregar o Firestore. Deixe a aba aberta e aguarde.");
 
   let ok = 0, falhas = 0, processados = 0;
   const erros = [];
   const inicio = Date.now();
 
-  // Migra um produto: grava a foto grande, depois troca o campo no produto.
   async function migrarUm(prod) {
     const thumb = await gerarThumbDeBase64(prod.imagem);
 
@@ -1863,33 +1869,44 @@ window.migrarFotos = async function (concorrencia = 6) {
     });
   }
 
-  // Processa vários em paralelo, mas com limite — sem limite, 1000 requisições
-  // simultâneas fazem o navegador e o Firestore engasgarem.
-  const fila = [...pendentes];
-  async function worker() {
-    while (fila.length > 0) {
-      const prod = fila.shift();
-      try {
-        await migrarUm(prod);
+  for (let i = 0; i < total; i += tamanhoLote) {
+    const lote = pendentes.slice(i, i + tamanhoLote);
+
+    const resultados = await Promise.allSettled(lote.map(migrarUm));
+    resultados.forEach((r, idx) => {
+      if (r.status === "fulfilled") {
         ok++;
-      } catch (err) {
+      } else {
         falhas++;
-        erros.push({ nome: prod.nome, id: prod.id, erro: err?.message || err });
+        erros.push({
+          nome: lote[idx].nome,
+          id: lote[idx].id,
+          erro: r.reason?.message || String(r.reason)
+        });
       }
-      processados++;
+    });
+    processados += lote.length;
 
-      // Mostra o progresso a cada 25 produtos pra não poluir o console
-      if (processados % 25 === 0 || processados === total) {
-        const pct = Math.round((processados / total) * 100);
-        const seg = Math.round((Date.now() - inicio) / 1000);
-        console.log(`${pct}% — ${processados}/${total} (${ok} ok, ${falhas} falhas) — ${seg}s`);
-      }
+    // Espera o servidor confirmar TUDO que foi enfileirado até aqui.
+    // É esta linha que impede a fila de envio de estourar.
+    try {
+      await waitForPendingWrites(window.db);
+    } catch (err) {
+      console.warn("Aguardando reconexão com o servidor...", err?.message || err);
+      await new Promise(r => setTimeout(r, 3000));
     }
-  }
 
-  await Promise.all(
-    Array.from({ length: Math.max(1, concorrencia) }, () => worker())
-  );
+    const pct = Math.round((processados / total) * 100);
+    const seg = Math.round((Date.now() - inicio) / 1000);
+    const restante = total - processados;
+    const estimativa = processados > 0
+      ? Math.round((seg / processados) * restante)
+      : 0;
+    console.log(
+      `${pct}% — ${processados}/${total} confirmados no servidor ` +
+      `(${ok} ok, ${falhas} falhas) — ${seg}s decorridos, ~${estimativa}s restantes`
+    );
+  }
 
   const segundos = Math.round((Date.now() - inicio) / 1000);
   console.log(`\n=== Migração concluída em ${segundos}s ===`);
@@ -1900,7 +1917,7 @@ window.migrarFotos = async function (concorrencia = 6) {
     console.table(erros);
     console.log("Rode migrarFotos() de novo para tentar só os que faltaram.");
   } else {
-    console.log("Recarregue a página (F5) para ver o resultado.");
+    console.log("Rode statusMigracao() para confirmar, depois recarregue com Ctrl+Shift+R.");
   }
 };
 
