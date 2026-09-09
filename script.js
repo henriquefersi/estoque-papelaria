@@ -2,6 +2,7 @@ import {
   collection,
   addDoc,
   getDocs,
+  getDoc,
   doc,
   updateDoc,
   deleteDoc,
@@ -31,6 +32,17 @@ async function carregarZXing() {
 const LIMITE_ESTOQUE_BAIXO = 2;
 const QUALIDADE_IMAGEM     = 0.7;
 const TAMANHO_MAX_IMAGEM   = 400;
+
+// Miniatura guardada dentro do documento do produto: é ela que aparece
+// na lista (quadradinho de 52px). Pequena de propósito — o objetivo é que
+// carregar a lista inteira seja leve.
+const TAMANHO_MAX_THUMB    = 96;
+const QUALIDADE_THUMB      = 0.55;
+
+// Coleção separada com as fotos em tamanho grande, uma por produto.
+// Só é lida quando alguém clica pra ampliar a foto.
+const IMAGENS_COLLECTION   = "produtosImagens";
+
 const SCANNER_INTERVALO_MS = 500;
 const BARCODE_FORMATS      = ["ean_13","ean_8","code_128","code_39","qr_code","upc_a","upc_e"];
 
@@ -118,8 +130,12 @@ try { localStorage.removeItem("listaReposicao"); } catch {}
 // ── Estado centralizado ──────────────────────────────────────────
 const estado = {
   todosProdutos:    [],
-  imagemBase64:     "",
+  imagemThumb:      "",        // miniatura da foto escolhida no formulário
+  imagemFull:       "",        // versão grande da foto escolhida no formulário
   imagemCarregando: false,
+  // Cache em memória das fotos grandes já baixadas (evita reler o Firestore
+  // toda vez que a mesma foto é ampliada): { [produtoId]: base64 }
+  cacheImagens:     {},
   produtoAtual:     { id: null, nome: "", qtd: 0 },
   editarId:         null,
   termoBusca:       "",          // mantém o filtro ativo após alterações
@@ -542,6 +558,9 @@ const uploadArea = document.getElementById("uploadArea");
 const fileInput  = document.getElementById("fileInput");
 const preview    = document.getElementById("uploadPreview");
 
+// Gera duas versões da foto a partir do arquivo escolhido:
+//  - thumb: miniatura leve, guardada no documento do produto (usada na lista)
+//  - full:  versão maior, guardada na coleção separada (usada ao ampliar)
 function comprimirImagem(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -550,16 +569,41 @@ function comprimirImagem(file) {
       const img = new Image();
       img.onerror = reject;
       img.onload = () => {
-        const scale  = Math.min(1, TAMANHO_MAX_IMAGEM / img.width);
-        const canvas = document.createElement("canvas");
-        canvas.width  = img.width  * scale;
-        canvas.height = img.height * scale;
-        canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
-        resolve(canvas.toDataURL("image/jpeg", QUALIDADE_IMAGEM));
+        const desenhar = (tamanhoMax, qualidade) => {
+          const scale  = Math.min(1, tamanhoMax / img.width);
+          const canvas = document.createElement("canvas");
+          canvas.width  = Math.round(img.width  * scale);
+          canvas.height = Math.round(img.height * scale);
+          canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+          return canvas.toDataURL("image/jpeg", qualidade);
+        };
+
+        resolve({
+          full:  desenhar(TAMANHO_MAX_IMAGEM, QUALIDADE_IMAGEM),
+          thumb: desenhar(TAMANHO_MAX_THUMB,  QUALIDADE_THUMB)
+        });
       };
       img.src = ev.target.result;
     };
     reader.readAsDataURL(file);
+  });
+}
+
+// Gera só a miniatura a partir de uma imagem que já está em base64.
+// Usada pela migração dos produtos antigos.
+function gerarThumbDeBase64(base64) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onerror = reject;
+    img.onload = () => {
+      const scale  = Math.min(1, TAMANHO_MAX_THUMB / img.width);
+      const canvas = document.createElement("canvas");
+      canvas.width  = Math.round(img.width  * scale);
+      canvas.height = Math.round(img.height * scale);
+      canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+      resolve(canvas.toDataURL("image/jpeg", QUALIDADE_THUMB));
+    };
+    img.src = base64;
   });
 }
 
@@ -569,19 +613,23 @@ fileInput.addEventListener("change", async (e) => {
 
   estado.imagemCarregando = true;
   try {
-    estado.imagemBase64 = await comprimirImagem(file);
-    preview.src = estado.imagemBase64;
+    const { thumb, full } = await comprimirImagem(file);
+    estado.imagemThumb = thumb;
+    estado.imagemFull  = full;
+    preview.src = thumb;
     uploadArea.classList.add("has-image");
   } catch {
     showToast("Erro ao processar imagem", "❌");
-    estado.imagemBase64 = "";
+    estado.imagemThumb = "";
+    estado.imagemFull  = "";
   } finally {
     estado.imagemCarregando = false;
   }
 });
 
 function resetUpload() {
-  estado.imagemBase64     = "";
+  estado.imagemThumb      = "";
+  estado.imagemFull       = "";
   estado.imagemCarregando = false;
   preview.src             = "";
   uploadArea.classList.remove("has-image");
@@ -662,7 +710,8 @@ function renderizarLista(produtos) {
 
   produtos.forEach((produto) => {
     const quantidade   = Number(produto.quantidade) || 0;
-    const imagem       = produto.imagem || "https://placehold.co/52x52/1a1a24/8888aa?text=?";
+    // Usa a miniatura; se o produto ainda não foi migrado, cai na foto antiga.
+    const imagem       = produto.thumb || produto.imagem || "https://placehold.co/52x52/1a1a24/8888aa?text=?";
     const estoqueClass = quantidade <= LIMITE_ESTOQUE_BAIXO ? "estoque-baixo" : "";
     const estoqueLabel = quantidade <= LIMITE_ESTOQUE_BAIXO ? `⚠️ ${quantidade}` : quantidade;
     const ariaEstoque  = quantidade <= LIMITE_ESTOQUE_BAIXO ? " (estoque baixo)" : "";
@@ -715,7 +764,7 @@ function renderizarLista(produtos) {
       e.stopPropagation();
       toggleReposicao(produto.id, quantidade);
     });
-    li.querySelector(".img-produto").addEventListener("click", () => abrirModalFoto(imagem));
+    li.querySelector(".img-produto").addEventListener("click", () => abrirModalFoto(produto.id, imagem));
     li.querySelector(".btn-mais").addEventListener("click", () => aumentar(produto.id, quantidade));
     li.querySelector(".btn-menos").addEventListener("click", () => diminuir(produto.id, quantidade));
     li.querySelector(".btn-minus-qtd").addEventListener("click", () =>
@@ -954,13 +1003,28 @@ window.adicionarProduto = async function () {
   btnText.textContent = "Adicionando...";
 
   try {
-    await addDoc(collection(window.db, "produtos"), {
+    // O documento do produto guarda só a miniatura (leve, usada na lista).
+    const ref = await addDoc(collection(window.db, "produtos"), {
       nome,
       quantidade,
-      imagem: estado.imagemBase64 || "",
+      thumb: estado.imagemThumb || "",
       codigoBarras: codigoBarras || "",
       estoque: estoqueLocal || ""
     });
+
+    // A foto em tamanho grande vai pra coleção separada, com o mesmo id.
+    // Se falhar, o produto continua cadastrado — só fica sem a foto ampliada.
+    if (estado.imagemFull) {
+      try {
+        await setDoc(doc(window.db, IMAGENS_COLLECTION, ref.id), {
+          imagem: estado.imagemFull,
+          atualizadoEm: serverTimestamp()
+        });
+      } catch (e) {
+        console.error("Erro ao salvar a foto ampliada:", e);
+        showToast("Produto salvo, mas a foto grande falhou", "⚠️");
+      }
+    }
 
     document.getElementById("nomeProduto").value         = "";
     document.getElementById("quantidadeProduto").value   = "";
@@ -1120,10 +1184,40 @@ document.getElementById("inputEditarBarcode").addEventListener("keydown", (e) =>
 });
 
 // ── Modal Foto ────────────────────────────────────────────────────
-function abrirModalFoto(src) {
-  if (!src || src.includes("placehold.co")) return;
-  document.getElementById("modalFotoImg").src = src;
+// Mostra a miniatura na hora (resposta instantânea) e, em paralelo, busca a
+// foto em tamanho grande na coleção separada, trocando quando ela chegar.
+async function abrirModalFoto(produtoId, thumbSrc) {
+  if (!thumbSrc || thumbSrc.includes("placehold.co")) return;
+
+  const img = document.getElementById("modalFotoImg");
+  img.src = thumbSrc;          // aparece imediatamente, mesmo que borrada
   abrirModal("modalFoto");
+
+  if (!produtoId) return;
+
+  // Já baixamos essa foto antes nesta sessão?
+  if (estado.cacheImagens[produtoId]) {
+    img.src = estado.cacheImagens[produtoId];
+    return;
+  }
+
+  try {
+    const snap = await getDoc(doc(window.db, IMAGENS_COLLECTION, produtoId));
+    if (snap.exists() && snap.data().imagem) {
+      const grande = snap.data().imagem;
+      estado.cacheImagens[produtoId] = grande;
+
+      // Só troca se o modal ainda estiver mostrando esta mesma foto
+      // (o usuário pode ter fechado e aberto outra enquanto carregava).
+      const modal = document.getElementById("modalFoto");
+      if (modal && modal.classList.contains("ativo")) {
+        img.src = grande;
+      }
+    }
+  } catch (err) {
+    // Sem foto grande disponível — a miniatura continua na tela.
+    console.error("Erro ao carregar foto ampliada:", err);
+  }
 }
 
 window.fecharModalFoto = function () {
@@ -1139,6 +1233,14 @@ async function remover(id, nome) {
   showLoading("Removendo produto...");
   try {
     await deleteDoc(doc(window.db, "produtos", id));
+
+    // Apaga também a foto grande da coleção separada (senão fica lixo no banco)
+    try {
+      await deleteDoc(doc(window.db, IMAGENS_COLLECTION, id));
+    } catch (e) {
+      console.error("Erro ao apagar a foto ampliada:", e);
+    }
+    delete estado.cacheImagens[id];
 
     // Remove o produto das listas de reposição de TODAS as lojas
     // (senão ficaria um item fantasma na lista da outra loja)
@@ -1197,7 +1299,7 @@ function renderizarModalReposicao() {
   itens.forEach((produto, index) => {
     const estoque    = Number(produto.quantidade) || 0;
     const aLevar     = estado.reposicao[produto.id];
-    const imagem     = produto.imagem || "https://placehold.co/40x40/1a1a24/8888aa?text=?";
+    const imagem     = produto.thumb || produto.imagem || "https://placehold.co/40x40/1a1a24/8888aa?text=?";
     const barcode    = produto.codigoBarras ? `⬛ ${produto.codigoBarras}` : "(sem código)";
     const estoqueBx  = estoque <= LIMITE_ESTOQUE_BAIXO;
     const estoqueLbl = estoqueBx ? `⚠️ ${estoque} un` : `${estoque} un`;
@@ -1333,10 +1435,11 @@ function imprimirLista() {
     const barcode = produto.codigoBarras || "—";
     const local   = rotuloEstoque(produto.estoque) || "—";
 
-    // A foto é base64 guardada no próprio produto, então imprime mesmo offline.
+    // A miniatura é base64 guardada no próprio produto, então imprime mesmo offline.
     // Sem foto, mostra um quadradinho vazio para a coluna não desalinhar.
-    const celulaFoto = produto.imagem
-      ? `<img src="${produto.imagem}" class="img-impressao" alt="">`
+    const fotoImpressao = produto.thumb || produto.imagem;
+    const celulaFoto = fotoImpressao
+      ? `<img src="${fotoImpressao}" class="img-impressao" alt="">`
       : `<span class="img-impressao-vazia">—</span>`;
 
     const tr = document.createElement("tr");
@@ -1684,6 +1787,113 @@ window.alternarScannerAdd = async function () {
       }
     }
   });
+};
+
+// ── Migração única: separar fotos antigas ────────────────────────
+// Converte os produtos que ainda guardam a foto grande no campo "imagem":
+//   1. gera a miniatura e grava em "thumb" no próprio produto
+//   2. copia a foto grande pra coleção produtosImagens/<id>
+//   3. apaga o campo "imagem" do produto (é o que estava pesando na lista)
+// Roda pelo console: migrarFotos()
+// É segura de rodar mais de uma vez — pula quem já foi migrado, então se
+// travar no meio ou você fechar a aba, é só rodar de novo que continua.
+window.migrarFotos = async function (concorrencia = 6) {
+  console.log("Buscando produtos direto do servidor...");
+  const snapshot = await getDocs(collection(window.db, "produtos"));
+
+  const pendentes = [];
+  snapshot.forEach((d) => {
+    const dados = d.data();
+    if (dados.imagem) pendentes.push({ id: d.id, nome: dados.nome, imagem: dados.imagem });
+  });
+
+  if (pendentes.length === 0) {
+    console.log("✅ Nada a migrar — todos os produtos já estão no formato novo.");
+    return;
+  }
+
+  const total = pendentes.length;
+  console.log(`Encontrados ${total} produto(s) para migrar.`);
+  console.log("Pode demorar alguns minutos. Deixe esta aba aberta e em primeiro plano.");
+
+  let ok = 0, falhas = 0, processados = 0;
+  const erros = [];
+  const inicio = Date.now();
+
+  // Migra um produto: grava a foto grande, depois troca o campo no produto.
+  async function migrarUm(prod) {
+    const thumb = await gerarThumbDeBase64(prod.imagem);
+
+    // 1) guarda a foto grande na coleção separada (cópia ANTES de apagar)
+    await setDoc(doc(window.db, IMAGENS_COLLECTION, prod.id), {
+      imagem: prod.imagem,
+      atualizadoEm: serverTimestamp()
+    });
+
+    // 2) grava a miniatura e remove o campo pesado do produto
+    await updateDoc(doc(window.db, "produtos", prod.id), {
+      thumb,
+      imagem: deleteField()
+    });
+  }
+
+  // Processa vários em paralelo, mas com limite — sem limite, 1000 requisições
+  // simultâneas fazem o navegador e o Firestore engasgarem.
+  const fila = [...pendentes];
+  async function worker() {
+    while (fila.length > 0) {
+      const prod = fila.shift();
+      try {
+        await migrarUm(prod);
+        ok++;
+      } catch (err) {
+        falhas++;
+        erros.push({ nome: prod.nome, id: prod.id, erro: err?.message || err });
+      }
+      processados++;
+
+      // Mostra o progresso a cada 25 produtos pra não poluir o console
+      if (processados % 25 === 0 || processados === total) {
+        const pct = Math.round((processados / total) * 100);
+        const seg = Math.round((Date.now() - inicio) / 1000);
+        console.log(`${pct}% — ${processados}/${total} (${ok} ok, ${falhas} falhas) — ${seg}s`);
+      }
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: Math.max(1, concorrencia) }, () => worker())
+  );
+
+  const segundos = Math.round((Date.now() - inicio) / 1000);
+  console.log(`\n=== Migração concluída em ${segundos}s ===`);
+  console.log(`${ok} migrado(s), ${falhas} falha(s).`);
+
+  if (falhas > 0) {
+    console.log("Produtos que falharam:");
+    console.table(erros);
+    console.log("Rode migrarFotos() de novo para tentar só os que faltaram.");
+  } else {
+    console.log("Recarregue a página (F5) para ver o resultado.");
+  }
+};
+
+// Mostra quantos produtos ainda faltam migrar, sem alterar nada.
+window.statusMigracao = async function () {
+  const snapshot = await getDocs(collection(window.db, "produtos"));
+  let comImagemAntiga = 0, comThumb = 0, semFoto = 0;
+
+  snapshot.forEach((d) => {
+    const dados = d.data();
+    if (dados.imagem) comImagemAntiga++;
+    else if (dados.thumb) comThumb++;
+    else semFoto++;
+  });
+
+  console.log(`Total de produtos: ${snapshot.size}`);
+  console.log(`  Falta migrar:     ${comImagemAntiga}`);
+  console.log(`  Já migrados:      ${comThumb}`);
+  console.log(`  Sem foto:         ${semFoto}`);
 };
 
 // ── Event Listeners ───────────────────────────────────────────────
