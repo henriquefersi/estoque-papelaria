@@ -38,6 +38,20 @@
   <div class="modal-overlay" id="modalEditar">
     <div class="modal-box">
       <h3 class="modal-titulo">✏️ Editar Produto</h3>
+
+      <!-- Foto do produto: trocar ou remover -->
+      <div class="editar-foto">
+        <label class="editar-foto-thumb" id="editarFotoThumb" title="Trocar foto">
+          <input type="file" id="inputEditarFoto" accept="image/*" hidden>
+          <span class="editar-foto-vazia">🖼️<br>Sem foto</span>
+        </label>
+        <div class="editar-foto-acoes">
+          <label class="btn-editar-foto" for="inputEditarFoto">📷 Trocar foto</label>
+          <button type="button" class="btn-remover-foto" id="btnRemoverFoto">Remover foto</button>
+          <span class="editar-foto-status" id="editarFotoStatus"></span>
+        </div>
+      </div>
+
       <input type="text" id="inputEditarNome" placeholder="Novo nome do produto">
 
       <div class="barcode-input-row">
@@ -92,7 +106,10 @@
   <div class="modal-overlay" id="modalReposicao">
     <div class="modal-box modal-reposicao-box">
       <div class="modal-reposicao-header">
-        <h3 class="modal-titulo">🛒 Lista de Reposição</h3>
+        <h3 class="modal-titulo modal-titulo-lista">
+          🛒 <span id="tituloListaModal">Lista de Reposição</span>
+          <button class="btn-renomear-lista" id="btnRenomearLista" title="Renomear lista" aria-label="Renomear lista">✏️</button>
+        </h3>
         <button class="modal-fechar-x" id="btnFecharReposicao">✕</button>
       </div>
 
@@ -117,7 +134,7 @@
       </button>
 
       <button class="btn-reposicao btn-reposicao-limpar" id="btnLimparReposicao">
-        🗑️ Limpar lista
+        🗑️ Excluir lista
       </button>
     </div>
   </div>
@@ -291,6 +308,9 @@
           <button class="chip-loja" data-loja="orion">Orion</button>
         </div>
       </div>
+
+      <!-- Listas abertas da loja ativa (geradas pelo script) -->
+      <div class="seletor-listas" id="seletorListas"></div>
 
       <!-- Os botões de filtro são gerados dinamicamente pelo script -->
       <div class="filtros-estoque" id="filtrosEstoque"></div>

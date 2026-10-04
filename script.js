@@ -13,7 +13,9 @@ import {
   serverTimestamp,
   arrayUnion,
   arrayRemove,
-  waitForPendingWrites
+  waitForPendingWrites,
+  query,
+  where
 } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-firestore.js";
 
 // ZXing: fallback de leitura de código de barras para navegadores
@@ -47,10 +49,11 @@ const IMAGENS_COLLECTION   = "produtosImagens";
 const SCANNER_INTERVALO_MS = 500;
 const BARCODE_FORMATS      = ["ean_13","ean_8","code_128","code_39","qr_code","upc_a","upc_e"];
 
-// Caminho do documento da lista de reposição no Firestore
-// Estrutura: config/listaReposicao_<loja> = { produtos: {[id]: qtd}, ordem: [...], atualizadoEm: ts }
-// Cada loja tem seu próprio documento, para as listas não se misturarem.
+// Coleção de configurações gerais (locais de estoque, etc.)
 const REPOS_COLLECTION = "config";
+
+// Listas de reposição: um documento por lista (várias por loja)
+const LISTAS_COLLECTION = "listasReposicao";
 
 // Lojas que compartilham o mesmo depósito, mas têm listas de reposição separadas
 const LOJAS = [
@@ -59,9 +62,10 @@ const LOJAS = [
 ];
 const LOJA_PADRAO   = "orionth";
 const STORAGE_LOJA  = "lojaAtiva";   // guarda a loja ativa por dispositivo
+const STORAGE_LISTA = "listaAtiva_"; // + id da loja: lista ativa por dispositivo
 
-// ID do documento da lista de reposição de uma loja
-function docReposicaoId(lojaId) {
+// ID do documento ANTIGO (uma lista só por loja) — usado só na migração
+function docReposicaoLegadoId(lojaId) {
   return `listaReposicao_${lojaId}`;
 }
 
@@ -144,7 +148,16 @@ const estado = {
   scannerBusca:     { stream: null, interval: null, ativo: false, zxingReader: null },
   scannerEditar:    { stream: null, interval: null, ativo: false, zxingReader: null },
   scannerAdd:       { stream: null, interval: null, ativo: false, zxingReader: null },
-  // Lista de reposição (sincronizada via Firestore): { [produtoId]: quantidade }
+  // Listas abertas da loja ativa: [{ id, nome, numero, produtos, ordem, ... }]
+  listas:           [],
+  // Lista em que os produtos estão sendo marcados agora
+  listaAtivaId:     null,
+  // Listas criadas neste aparelho que ainda não voltaram no snapshot
+  listasCriando:    {},
+  migracaoListasFeita: false,
+  // Foto escolhida no modal de editar
+  editarFoto:       { thumb: "", full: "", alterada: false, remover: false, carregando: false },
+  // Produtos da lista ATIVA (sincronizada via Firestore): { [produtoId]: quantidade }
   reposicao:        {},
   // Ordem de seleção dos produtos (na sequência em que foram marcados)
   ordemReposicao:   [],
@@ -200,14 +213,62 @@ function fecharModal(id) {
   document.getElementById(id).classList.remove("ativo");
 }
 
-// ── Lista de Reposição: sincronização com Firestore ─────────────
-// Referência do documento da lista
-function refReposicao() {
-  return doc(window.db, REPOS_COLLECTION, docReposicaoId(estado.lojaAtiva));
+// ── Listas de Reposição: sincronização com Firestore ────────────
+// Cada lista é um documento em listasReposicao/<id>:
+//   { loja, nome, numero, produtos: {[id]: qtd}, ordem: [...], criadoEm, criadoEmLocal, atualizadoEm }
+// Uma loja pode ter várias listas abertas ao mesmo tempo. A "lista ativa"
+// é aquela em que os produtos são marcados (lembrada por dispositivo).
+
+function carregarListaAtivaSalva(lojaId) {
+  try { return localStorage.getItem(STORAGE_LISTA + lojaId) || null; } catch { return null; }
 }
 
-// Inicia (ou reinicia) o listener em tempo real da loja ativa.
-// Se já houver um listener ativo para a mesma loja, não faz nada.
+function salvarListaAtiva() {
+  try {
+    const chave = STORAGE_LISTA + estado.lojaAtiva;
+    if (estado.listaAtivaId) localStorage.setItem(chave, estado.listaAtivaId);
+    else localStorage.removeItem(chave);
+  } catch {}
+}
+
+function listaAtiva() {
+  return estado.listas.find(l => l.id === estado.listaAtivaId) || null;
+}
+
+function nomeListaAtiva() {
+  const l = listaAtiva();
+  return l ? l.nome : "Lista de Reposição";
+}
+
+// Referência do documento da lista ativa (null se não houver lista aberta)
+function refReposicao() {
+  return estado.listaAtivaId
+    ? doc(window.db, LISTAS_COLLECTION, estado.listaAtivaId)
+    : null;
+}
+
+// Copia os produtos da lista ativa para estado.reposicao / estado.ordemReposicao
+function aplicarListaAtivaNoEstado() {
+  const l = listaAtiva();
+  estado.reposicao      = l ? { ...(l.produtos || {}) } : {};
+  estado.ordemReposicao = l && Array.isArray(l.ordem) ? [...l.ordem] : [];
+}
+
+// "03/10 14:30"
+function formatarDataCurta(d = new Date()) {
+  return d.toLocaleString("pt-BR", {
+    day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit"
+  }).replace(",", "");
+}
+
+// Escapa texto digitado pelo usuário antes de colocar no HTML
+function escapeHtml(txt) {
+  return String(txt ?? "")
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
+// Inicia (ou reinicia) o listener em tempo real das listas da loja ativa.
 function iniciarListenerReposicao(forcar = false) {
   if (!forcar && estado.listenerReposicaoAtivo && estado.lojaListener === estado.lojaAtiva) {
     return;
@@ -219,39 +280,61 @@ function iniciarListenerReposicao(forcar = false) {
     estado.unsubReposicao = null;
   }
   estado.listenerReposicaoAtivo = true;
-  estado.lojaListener = estado.lojaAtiva;
+  const loja = estado.lojaAtiva;
+  estado.lojaListener = loja;
 
-  estado.unsubReposicao = onSnapshot(refReposicao(), (snap) => {
-    const dados         = snap.exists() ? snap.data() : {};
-    const novaReposicao = dados.produtos || {};
+  const q = query(collection(window.db, LISTAS_COLLECTION), where("loja", "==", loja));
 
-    const antesTinha = Object.keys(estado.reposicao).length;
-    const agoraTem   = Object.keys(novaReposicao).length;
+  estado.unsubReposicao = onSnapshot(q, (snap) => {
+    if (estado.lojaListener !== loja) return; // chegou atrasado de outra loja
 
-    estado.reposicao     = novaReposicao;
-    estado.ordemReposicao = Array.isArray(dados.ordem) ? dados.ordem : [];
+    const listas = [];
+    snap.forEach(d => listas.push({ id: d.id, ...d.data() }));
+
+    // Listas recém-criadas neste aparelho que o snapshot ainda não trouxe
+    for (const [id, dados] of Object.entries(estado.listasCriando)) {
+      if (!listas.some(l => l.id === id)) listas.push({ id, ...dados });
+    }
+
+    listas.sort((a, b) =>
+      (Number(a.numero) || 0) - (Number(b.numero) || 0) ||
+      (Number(a.criadoEmLocal) || 0) - (Number(b.criadoEmLocal) || 0)
+    );
+
+    const idAnterior = estado.listaAtivaId;
+    estado.listas = listas;
+
+    // A lista ativa deixou de existir? (finalizada/excluída aqui ou em outro aparelho)
+    const sumiu = !!idAnterior && !listas.some(l => l.id === idAnterior);
+
+    if (!estado.listaAtivaId || sumiu) {
+      const salva     = carregarListaAtivaSalva(loja);
+      const escolhida = listas.find(l => l.id === salva && l.id !== idAnterior) || listas[0] || null;
+      estado.listaAtivaId = escolhida ? escolhida.id : null;
+      salvarListaAtiva();
+    }
+
+    aplicarListaAtivaNoEstado();
+    renderizarSeletorListas();
     atualizarBannerReposicao();
     atualizarCheckboxesVisuais();
 
     const modal       = document.getElementById("modalReposicao");
     const modalAberto = modal && modal.classList.contains("ativo");
 
-    // Detecta finalização/limpeza vinda de outro dispositivo
-    const ehFinalizacaoLocal = estado.finalizandoLocal;
-    estado.finalizandoLocal = false;
-
-    if (modalAberto) {
-      if (antesTinha > 0 && agoraTem === 0 && !ehFinalizacaoLocal) {
-        // Outro dispositivo finalizou ou limpou a lista
+    if (sumiu) {
+      const ehLocal = estado.finalizandoLocal;
+      estado.finalizandoLocal = false;
+      if (modalAberto) {
         fecharModal("modalReposicao");
-        showToast("Lista finalizada em outro dispositivo", "ℹ️");
-      } else if (agoraTem > 0) {
-        // Re-renderiza pra refletir mudanças vindas de outros dispositivos
-        renderizarModalReposicao();
+        if (!ehLocal) showToast("Lista finalizada em outro dispositivo", "ℹ️");
       }
+    } else if (modalAberto) {
+      // Re-renderiza pra refletir mudanças vindas de outros dispositivos
+      renderizarModalReposicao();
     }
   }, (err) => {
-    console.error("Erro no listener da lista de reposição:", err);
+    console.error("Erro no listener das listas de reposição:", err);
   });
 }
 
@@ -263,21 +346,24 @@ function trocarLoja(lojaId) {
   estado.lojaAtiva = lojaId;
   try { localStorage.setItem(STORAGE_LOJA, lojaId); } catch {}
 
-  // Zera o estado local da lista (o listener da nova loja vai preencher)
-  estado.reposicao     = {};
-  estado.ordemReposicao = [];
+  // Zera o estado local (o listener da nova loja vai preencher)
+  estado.listas        = [];
+  estado.listaAtivaId  = null;
+  estado.listasCriando = {};
+  aplicarListaAtivaNoEstado();
 
   // Fecha o modal se estiver aberto (a lista mudou de contexto)
   fecharModal("modalReposicao");
 
   atualizarBotoesLoja();
+  renderizarSeletorListas();
   atualizarBannerReposicao();
   atualizarCheckboxesVisuais();
 
-  // Reinicia o listener apontando para o documento da nova loja
+  // Reinicia o listener apontando para as listas da nova loja
   iniciarListenerReposicao(true);
 
-  showToast(`Lista da loja ${nomeLoja(lojaId)}`, "🏬");
+  showToast(`Listas da loja ${nomeLoja(lojaId)}`, "🏬");
 }
 
 // Atualiza o destaque visual dos botões de loja
@@ -289,6 +375,167 @@ function atualizarBotoesLoja() {
   document.querySelectorAll(".loja-ativa-nome").forEach(el => {
     el.textContent = nomeLoja(estado.lojaAtiva);
   });
+}
+
+// ── Seletor de listas abertas ────────────────────────────────────
+function renderizarSeletorListas() {
+  const cont = document.getElementById("seletorListas");
+  if (!cont) return;
+
+  let html = "";
+  if (estado.listas.length === 0) {
+    html += `<span class="seletor-listas-label">📝 Nenhuma lista aberta — marque um produto ou crie uma nova</span>`;
+  } else {
+    html += `<span class="seletor-listas-label">📝 Marcando na lista:</span>`;
+  }
+
+  html += `<div class="seletor-listas-botoes">`;
+  estado.listas.forEach(l => {
+    const qtd   = Object.keys(l.produtos || {}).length;
+    const ativo = l.id === estado.listaAtivaId;
+    const dica  = ativo ? "Lista ativa — toque para abrir" : "Toque para marcar produtos nesta lista";
+    html += `
+      <button class="chip-lista${ativo ? " ativo" : ""}" data-lista="${l.id}" title="${dica}">
+        <span class="chip-lista-nome">${escapeHtml(l.nome)}</span>
+        <span class="chip-lista-qtd">${qtd}</span>
+      </button>`;
+  });
+  html += `<button class="chip-lista chip-lista-nova" id="btnNovaLista" title="Começar outra lista para esta loja">➕ Nova lista</button>`;
+  html += `</div>`;
+
+  cont.innerHTML = html;
+
+  cont.querySelectorAll(".chip-lista[data-lista]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const id = btn.dataset.lista;
+      if (id === estado.listaAtivaId) abrirModalReposicao();
+      else selecionarLista(id);
+    });
+  });
+  document.getElementById("btnNovaLista").addEventListener("click", () => criarNovaLista());
+}
+
+function selecionarLista(id) {
+  const l = estado.listas.find(x => x.id === id);
+  if (!l) return;
+  estado.listaAtivaId = id;
+  salvarListaAtiva();
+  aplicarListaAtivaNoEstado();
+  renderizarSeletorListas();
+  atualizarBannerReposicao();
+  atualizarCheckboxesVisuais();
+  showToast(`Marcando em "${l.nome}"`, "📝");
+}
+
+// Cria uma lista nova para a loja ativa e já a deixa como ativa.
+// Pode nascer com produtos (quando é criada ao marcar o 1º produto).
+async function criarNovaLista(produtosIniciais = {}, ordemInicial = []) {
+  const numero = estado.listas.reduce((m, l) => Math.max(m, Number(l.numero) || 0), 0) + 1;
+  const ref    = doc(collection(window.db, LISTAS_COLLECTION));
+  const nome   = `Lista ${numero} · ${formatarDataCurta()}`;
+  const dados  = {
+    loja:          estado.lojaAtiva,
+    nome,
+    numero,
+    produtos:      produtosIniciais,
+    ordem:         ordemInicial,
+    criadoEmLocal: Date.now()
+  };
+
+  // Atualização otimista: a lista aparece na hora
+  estado.listasCriando[ref.id] = dados;
+  estado.listas = [...estado.listas, { id: ref.id, ...dados }];
+  estado.listaAtivaId = ref.id;
+  salvarListaAtiva();
+  aplicarListaAtivaNoEstado();
+  renderizarSeletorListas();
+  atualizarBannerReposicao();
+  atualizarCheckboxesVisuais();
+  showToast(`${nome} criada`, "🆕");
+
+  try {
+    await setDoc(ref, {
+      ...dados,
+      criadoEm:     serverTimestamp(),
+      atualizadoEm: serverTimestamp()
+    });
+    return ref.id;
+  } catch (err) {
+    // Desfaz
+    estado.listas = estado.listas.filter(l => l.id !== ref.id);
+    if (estado.listaAtivaId === ref.id) {
+      estado.listaAtivaId = estado.listas[0] ? estado.listas[0].id : null;
+      salvarListaAtiva();
+    }
+    aplicarListaAtivaNoEstado();
+    renderizarSeletorListas();
+    atualizarBannerReposicao();
+    atualizarCheckboxesVisuais();
+    showToast("Erro ao criar lista", "❌");
+    console.error(err);
+    return null;
+  } finally {
+    delete estado.listasCriando[ref.id];
+  }
+}
+
+async function renomearListaAtiva() {
+  const l = listaAtiva();
+  if (!l) return;
+  const novo = prompt("Nome da lista:", l.nome);
+  if (novo === null) return;
+  const limpo = novo.trim();
+  if (!limpo || limpo === l.nome) return;
+
+  try {
+    await updateDoc(doc(window.db, LISTAS_COLLECTION, l.id), {
+      nome: limpo,
+      atualizadoEm: serverTimestamp()
+    });
+    showToast("Lista renomeada", "✏️");
+  } catch (err) {
+    showToast("Erro ao renomear lista", "❌");
+    console.error(err);
+  }
+}
+
+// Migração única: as versões antigas tinham UMA lista por loja em
+// config/listaReposicao_<loja>. Se houver algo lá, vira a "Lista 1" da loja.
+// O id fixo (antiga_<loja>) evita duplicar se dois aparelhos rodarem juntos.
+async function migrarListasAntigas() {
+  if (estado.migracaoListasFeita) return;
+  estado.migracaoListasFeita = true;
+
+  for (const loja of LOJAS) {
+    try {
+      const refAntiga = doc(window.db, REPOS_COLLECTION, docReposicaoLegadoId(loja.id));
+      const snap = await getDoc(refAntiga);
+      if (!snap.exists()) continue;
+
+      const dados    = snap.data() || {};
+      const produtos = dados.produtos || {};
+
+      if (Object.keys(produtos).length > 0) {
+        const batch = writeBatch(window.db);
+        batch.set(doc(window.db, LISTAS_COLLECTION, `antiga_${loja.id}`), {
+          loja:          loja.id,
+          nome:          `Lista 1 · ${formatarDataCurta()}`,
+          numero:        1,
+          produtos,
+          ordem:         Array.isArray(dados.ordem) ? dados.ordem : Object.keys(produtos),
+          criadoEm:      serverTimestamp(),
+          criadoEmLocal: Date.now(),
+          atualizadoEm:  serverTimestamp()
+        });
+        batch.delete(refAntiga);
+        await batch.commit();
+      } else {
+        await deleteDoc(refAntiga);
+      }
+    } catch (err) {
+      console.error(`Erro ao migrar a lista antiga da loja ${loja.id}:`, err);
+    }
+  }
 }
 
 // ── Locais de estoque: sincronização com Firestore ───────────────
@@ -426,27 +673,23 @@ async function excluirLocalEstoque(codigo) {
   }
 }
 
-// Operações de escrita no Firestore
-async function setItemReposicao(produtoId, quantidade) {
-  await setDoc(refReposicao(), {
-    produtos: { [produtoId]: quantidade },
+// Operações de escrita na lista ativa.
+// updateDoc (e não setDoc com merge) de propósito: se a lista foi finalizada
+// em outro aparelho, a escrita falha em vez de recriar uma lista fantasma.
+async function setItemReposicao(produtoId, quantidade, listaId = estado.listaAtivaId) {
+  if (!listaId) throw new Error("Nenhuma lista aberta");
+  await updateDoc(doc(window.db, LISTAS_COLLECTION, listaId), {
+    [`produtos.${produtoId}`]: quantidade,
     ordem: arrayUnion(produtoId),   // adiciona ao fim da ordem (sem duplicar)
     atualizadoEm: serverTimestamp()
-  }, { merge: true });
+  });
 }
 
-async function removerItemReposicao(produtoId) {
-  await setDoc(refReposicao(), {
-    produtos: { [produtoId]: deleteField() },
+async function removerItemReposicao(produtoId, listaId = estado.listaAtivaId) {
+  if (!listaId) throw new Error("Nenhuma lista aberta");
+  await updateDoc(doc(window.db, LISTAS_COLLECTION, listaId), {
+    [`produtos.${produtoId}`]: deleteField(),
     ordem: arrayRemove(produtoId),  // remove da ordem também
-    atualizadoEm: serverTimestamp()
-  }, { merge: true });
-}
-
-async function limparReposicaoFirestore() {
-  await setDoc(refReposicao(), {
-    produtos: {},
-    ordem: [],
     atualizadoEm: serverTimestamp()
   });
 }
@@ -480,15 +723,17 @@ function atualizarBannerReposicao() {
   const titulo = document.getElementById("bannerReposicaoTitulo");
   const total  = totalProdutosReposicao();
 
-  if (titulo) titulo.textContent = `Lista · ${nomeLoja(estado.lojaAtiva)}`;
+  if (titulo) titulo.textContent = `${nomeLoja(estado.lojaAtiva)} · ${nomeListaAtiva()}`;
 
   if (total === 0) {
     banner.style.display = "none";
   } else {
     banner.style.display = "block";
-    sub.textContent = total === 1
+    const outras = estado.listas.length - 1;
+    const txtOutras = outras > 0 ? ` · +${outras} lista${outras > 1 ? "s" : ""} aberta${outras > 1 ? "s" : ""}` : "";
+    sub.textContent = (total === 1
       ? "1 produto para buscar"
-      : `${total} produtos para buscar`;
+      : `${total} produtos para buscar`) + txtOutras;
   }
 }
 
@@ -498,7 +743,14 @@ async function toggleReposicao(produtoId, estoqueAtual) {
     return;
   }
 
-  const jaTem = estado.reposicao[produtoId] !== undefined;
+  // Nenhuma lista aberta nesta loja: cria uma já com este produto
+  if (!listaAtiva()) {
+    await criarNovaLista({ [produtoId]: 1 }, [produtoId]);
+    return;
+  }
+
+  const listaId = estado.listaAtivaId;
+  const jaTem   = estado.reposicao[produtoId] !== undefined;
 
   // Atualização otimista local (UI responde rápido)
   if (jaTem) {
@@ -517,23 +769,25 @@ async function toggleReposicao(produtoId, estoqueAtual) {
   // Persistir no Firestore (sincroniza com outros dispositivos)
   try {
     if (jaTem) {
-      await removerItemReposicao(produtoId);
+      await removerItemReposicao(produtoId, listaId);
     } else {
-      await setItemReposicao(produtoId, 1);
+      await setItemReposicao(produtoId, 1, listaId);
     }
   } catch (err) {
-    // Reverter atualização otimista em caso de erro
-    if (jaTem) {
-      estado.reposicao[produtoId] = 1;
-      if (!estado.ordemReposicao.includes(produtoId)) {
-        estado.ordemReposicao.push(produtoId);
+    // Reverter atualização otimista (só se ainda estivermos na mesma lista)
+    if (estado.listaAtivaId === listaId) {
+      if (jaTem) {
+        estado.reposicao[produtoId] = 1;
+        if (!estado.ordemReposicao.includes(produtoId)) {
+          estado.ordemReposicao.push(produtoId);
+        }
+      } else {
+        delete estado.reposicao[produtoId];
+        estado.ordemReposicao = estado.ordemReposicao.filter(x => x !== produtoId);
       }
-    } else {
-      delete estado.reposicao[produtoId];
-      estado.ordemReposicao = estado.ordemReposicao.filter(x => x !== produtoId);
+      atualizarBannerReposicao();
+      atualizarCheckboxesVisuais();
     }
-    atualizarBannerReposicao();
-    atualizarCheckboxesVisuais();
     showToast("Erro ao atualizar lista", "❌");
     console.error(err);
   }
@@ -648,35 +902,35 @@ async function mostrarProdutos() {
       estado.todosProdutos.push({ id: documento.id, ...documento.data() });
     });
 
-    // Inicia o listener da lista de reposição (uma única vez por sessão)
+    // Converte a lista antiga (1 por loja) para o formato novo — só roda uma vez
+    await migrarListasAntigas();
+
+    // Inicia o listener das listas de reposição (uma única vez por sessão)
     iniciarListenerReposicao();
     iniciarListenerLocais();
 
-    // Limpa da reposição qualquer produto que não existe mais OU que está sem estoque.
-    // Como o listener pode ainda não ter chegado, fazemos isso de forma idempotente:
-    // tentamos sincronizar com o Firestore (se falhar, o estado local segue válido).
+    // Limpa das listas abertas qualquer produto que não existe mais OU que
+    // está sem estoque, e ajusta quantidades maiores que o estoque atual.
     const ajustesReposicao = [];
-    for (const id of Object.keys(estado.reposicao)) {
-      const prod = estado.todosProdutos.find(p => p.id === id);
-      if (!prod || Number(prod.quantidade) <= 0) {
-        delete estado.reposicao[id];
-        estado.ordemReposicao = estado.ordemReposicao.filter(x => x !== id);
-        ajustesReposicao.push({ id, acao: "remover" });
-      } else if (estado.reposicao[id] > Number(prod.quantidade)) {
-        // Ajusta a quantidade se ultrapassar o novo estoque
-        const novaQtd = Number(prod.quantidade);
-        estado.reposicao[id] = novaQtd;
-        ajustesReposicao.push({ id, acao: "ajustar", qtd: novaQtd });
+    for (const lista of estado.listas) {
+      const produtosLista = lista.produtos || {};
+      for (const id of Object.keys(produtosLista)) {
+        const prod = estado.todosProdutos.find(p => p.id === id);
+        if (!prod || Number(prod.quantidade) <= 0) {
+          ajustesReposicao.push({ listaId: lista.id, id, acao: "remover" });
+        } else if (produtosLista[id] > Number(prod.quantidade)) {
+          ajustesReposicao.push({ listaId: lista.id, id, acao: "ajustar", qtd: Number(prod.quantidade) });
+        }
       }
     }
 
-    // Propaga ajustes pro Firestore em background (não trava a UI)
+    // Propaga os ajustes pro Firestore (o listener atualiza a tela depois)
     for (const ajuste of ajustesReposicao) {
       try {
         if (ajuste.acao === "remover") {
-          await removerItemReposicao(ajuste.id);
+          await removerItemReposicao(ajuste.id, ajuste.listaId);
         } else {
-          await setItemReposicao(ajuste.id, ajuste.qtd);
+          await setItemReposicao(ajuste.id, ajuste.qtd, ajuste.listaId);
         }
       } catch (err) {
         console.error("Erro ao sincronizar ajuste da reposição:", err);
@@ -772,7 +1026,7 @@ function renderizarLista(produtos) {
       abrirModalRemoverQtd(produto.id, produto.nome, quantidade)
     );
     li.querySelector(".btn-editar").addEventListener("click", () =>
-      abrirModalEditar(produto.id, produto.nome, produto.codigoBarras || "", produto.estoque || "")
+      abrirModalEditar(produto)
     );
     li.querySelector(".btn-remover").addEventListener("click", () =>
       confirmarRemover(produto.id, produto.nome)
@@ -1126,14 +1380,69 @@ async function confirmarAjusteQtd(tipo) {
 }
 
 // ── Editar produto ────────────────────────────────────────────────
-function abrirModalEditar(id, nomeAtual, barcodeAtual = "", estoqueAtual = "") {
-  estado.editarId = id;
-  document.getElementById("inputEditarNome").value    = nomeAtual;
-  document.getElementById("inputEditarBarcode").value = barcodeAtual;
-  document.getElementById("inputEditarEstoque").value = estoqueAtual || "";
+function abrirModalEditar(produto) {
+  estado.editarId = produto.id;
+  document.getElementById("inputEditarNome").value    = produto.nome;
+  document.getElementById("inputEditarBarcode").value = produto.codigoBarras || "";
+  document.getElementById("inputEditarEstoque").value = produto.estoque || "";
+
+  // Foto atual (miniatura) — pode ser trocada ou removida
+  estado.editarFoto = { thumb: "", full: "", alterada: false, remover: false, carregando: false };
+  document.getElementById("inputEditarFoto").value = "";
+  mostrarFotoEditar(produto.thumb || produto.imagem || "", "");
+
   pararScannerGenerico(estado.scannerEditar, "scannerAreaEditar", "btnScanEditar");
   abrirModal("modalEditar");
   setTimeout(() => document.getElementById("inputEditarNome").focus(), 100);
+}
+
+// Mostra a foto no quadrado do modal de editar ("" = sem foto)
+function mostrarFotoEditar(src, status) {
+  const box    = document.getElementById("editarFotoThumb");
+  const input  = document.getElementById("inputEditarFoto");
+  const btnRem = document.getElementById("btnRemoverFoto");
+
+  // Remove a imagem/placeholder anterior, mantendo o <input type=file>
+  box.querySelectorAll("img, .editar-foto-vazia").forEach(el => el.remove());
+
+  if (src) {
+    const img = document.createElement("img");
+    img.src = src;
+    img.alt = "Foto do produto";
+    box.insertBefore(img, input);
+  } else {
+    const vazio = document.createElement("span");
+    vazio.className = "editar-foto-vazia";
+    vazio.innerHTML = "🖼️<br>Sem foto";
+    box.insertBefore(vazio, input);
+  }
+
+  btnRem.style.display = src ? "" : "none";
+  document.getElementById("editarFotoStatus").textContent = status || "";
+}
+
+async function escolherFotoEditar(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  estado.editarFoto.carregando = true;
+  document.getElementById("editarFotoStatus").textContent = "Processando...";
+  try {
+    const { thumb, full } = await comprimirImagem(file);
+    estado.editarFoto = { thumb, full, alterada: true, remover: false, carregando: false };
+    mostrarFotoEditar(thumb, "Nova foto — clique em Salvar");
+  } catch (err) {
+    estado.editarFoto.carregando = false;
+    document.getElementById("editarFotoStatus").textContent = "";
+    showToast("Erro ao processar imagem", "❌");
+    console.error(err);
+  }
+}
+
+function removerFotoEditar() {
+  estado.editarFoto = { thumb: "", full: "", alterada: false, remover: true, carregando: false };
+  document.getElementById("inputEditarFoto").value = "";
+  mostrarFotoEditar("", "Foto será removida ao salvar");
 }
 
 window.fecharModalEditar = function () {
@@ -1148,6 +1457,11 @@ window.salvarEdicao = async function () {
 
   if (!novoNome) { showToast("Digite um nome válido", "⚠️"); return; }
 
+  if (estado.editarFoto.carregando) {
+    showToast("Aguarde a imagem terminar de carregar", "⏳");
+    return;
+  }
+
   const btn     = document.querySelector("#modalEditar .btn-modal-confirm");
   const spinner = document.getElementById("spinnerEditar");
   const texto   = document.getElementById("textoSalvar");
@@ -1158,12 +1472,43 @@ window.salvarEdicao = async function () {
 
   pararScannerGenerico(estado.scannerEditar, "scannerAreaEditar", "btnScanEditar");
 
+  const id   = estado.editarId;
+  const foto = estado.editarFoto;
+
   try {
-    await updateDoc(doc(window.db, "produtos", estado.editarId), {
+    const dados = {
       nome: novoNome,
       codigoBarras: novoBarcode,
       estoque: novoEstoque || ""
-    });
+    };
+    if (foto.alterada || foto.remover) {
+      dados.thumb  = foto.alterada ? foto.thumb : "";
+      dados.imagem = deleteField(); // apaga a foto do formato antigo, se ainda existir
+    }
+    await updateDoc(doc(window.db, "produtos", id), dados);
+
+    // Foto grande na coleção separada (mesmo id do produto)
+    if (foto.alterada) {
+      try {
+        await setDoc(doc(window.db, IMAGENS_COLLECTION, id), {
+          imagem: foto.full,
+          atualizadoEm: serverTimestamp()
+        });
+        estado.cacheImagens[id] = foto.full;
+      } catch (e) {
+        delete estado.cacheImagens[id];
+        console.error("Erro ao salvar a foto ampliada:", e);
+        showToast("Produto salvo, mas a foto grande falhou", "⚠️");
+      }
+    } else if (foto.remover) {
+      try {
+        await deleteDoc(doc(window.db, IMAGENS_COLLECTION, id));
+      } catch (e) {
+        console.error("Erro ao apagar a foto ampliada:", e);
+      }
+      delete estado.cacheImagens[id];
+    }
+
     fecharModal("modalEditar");
     showToast(`"${novoNome}" atualizado!`);
     await mostrarProdutos();
@@ -1243,17 +1588,18 @@ async function remover(id, nome) {
     }
     delete estado.cacheImagens[id];
 
-    // Remove o produto das listas de reposição de TODAS as lojas
-    // (senão ficaria um item fantasma na lista da outra loja)
-    for (const loja of LOJAS) {
-      try {
-        await setDoc(doc(window.db, REPOS_COLLECTION, docReposicaoId(loja.id)), {
-          produtos: { [id]: deleteField() },
-          ordem: arrayRemove(id),
-          atualizadoEm: serverTimestamp()
-        }, { merge: true });
-      } catch (e) { console.error(`Erro ao limpar produto da loja ${loja.id}:`, e); }
-    }
+    // Remove o produto de TODAS as listas abertas, de todas as lojas
+    // (senão ficaria um item fantasma em outra lista)
+    try {
+      const listasSnap = await getDocs(collection(window.db, LISTAS_COLLECTION));
+      for (const d of listasSnap.docs) {
+        const prods = d.data().produtos || {};
+        if (prods[id] === undefined) continue;
+        try {
+          await removerItemReposicao(id, d.id);
+        } catch (e) { console.error(`Erro ao limpar produto da lista ${d.id}:`, e); }
+      }
+    } catch (e) { console.error("Erro ao buscar listas de reposição:", e); }
 
     // Atualiza o estado local da loja ativa
     if (estado.reposicao[id] !== undefined) {
@@ -1271,9 +1617,8 @@ async function remover(id, nome) {
 
 // ── Modal de Reposição ────────────────────────────────────────────
 function abrirModalReposicao() {
-  const total = totalProdutosReposicao();
-  if (total === 0) {
-    showToast("Nenhum produto marcado", "⚠️");
+  if (!listaAtiva()) {
+    showToast("Nenhuma lista aberta nesta loja", "⚠️");
     return;
   }
   renderizarModalReposicao();
@@ -1289,8 +1634,18 @@ function renderizarModalReposicao() {
     ? "1 produto para buscar no depósito"
     : `${total} produtos para buscar no depósito`;
   info.innerHTML = `<span class="reposicao-loja-badge">🏬 ${nomeLoja(estado.lojaAtiva)}</span> ${totalTxt}`;
+  document.getElementById("tituloListaModal").textContent = nomeListaAtiva();
 
   container.innerHTML = "";
+
+  if (total === 0) {
+    container.innerHTML = `
+      <div class="lista-vazia">
+        <div class="lista-vazia-icon">📝</div>
+        <p>Lista vazia. Marque produtos na lista do estoque para adicioná-los aqui.</p>
+      </div>`;
+    return;
+  }
 
   // Segue a ordem em que os produtos foram selecionados
   const itens = idsReposicaoOrdenados()
@@ -1348,14 +1703,7 @@ function renderizarModalReposicao() {
       atualizarBannerReposicao();
       atualizarCheckboxesVisuais();
 
-      const ficouVazio = totalProdutosReposicao() === 0;
-      if (ficouVazio) {
-        estado.finalizandoLocal = true; // evita o toast "finalizada em outro dispositivo"
-        fecharModal("modalReposicao");
-        showToast("Lista esvaziada", "🗑️");
-      } else {
-        renderizarModalReposicao();
-      }
+      renderizarModalReposicao();
 
       try {
         await removerItemReposicao(produto.id);
@@ -1410,11 +1758,12 @@ function renderizarModalReposicao() {
 
 // ── Imprimir lista ────────────────────────────────────────────────
 function imprimirLista() {
+  if (totalProdutosReposicao() === 0) { showToast("Lista vazia", "⚠️"); return; }
   const corpo  = document.getElementById("corpoImpressao");
   const dataEl = document.getElementById("impressaoData");
   const tituloEl = document.getElementById("impressaoTitulo");
 
-  if (tituloEl) tituloEl.textContent = `🛒 Lista de Reposição · ${nomeLoja(estado.lojaAtiva)}`;
+  if (tituloEl) tituloEl.textContent = `🛒 ${nomeListaAtiva()} · ${nomeLoja(estado.lojaAtiva)}`;
 
   // Formata data atual em pt-BR
   const agora = new Date();
@@ -1462,6 +1811,7 @@ function imprimirLista() {
 
 // ── Compartilhar lista ────────────────────────────────────────────
 async function compartilharLista() {
+  if (totalProdutosReposicao() === 0) { showToast("Lista vazia", "⚠️"); return; }
   const itens = idsReposicaoOrdenados()
     .map(id => estado.todosProdutos.find(p => p.id === id))
     .filter(p => p);
@@ -1472,7 +1822,7 @@ async function compartilharLista() {
     hour: "2-digit", minute: "2-digit"
   });
 
-  let texto = `🛒 *Lista de Reposição · ${nomeLoja(estado.lojaAtiva)}*\n_Gerada em ${dataFmt}_\n\n`;
+  let texto = `🛒 *${nomeListaAtiva()} · ${nomeLoja(estado.lojaAtiva)}*\n_Gerada em ${dataFmt}_\n\n`;
   itens.forEach((produto, index) => {
     const estoque = Number(produto.quantidade) || 0;
     const aLevar  = estado.reposicao[produto.id];
@@ -1552,19 +1902,10 @@ async function finalizarReposicao() {
       const novoEstoque = Math.max(0, (Number(produto.quantidade) || 0) - qtdLevar);
       batch.update(doc(window.db, "produtos", id), { quantidade: novoEstoque });
     });
-    // Limpa a lista de reposição no mesmo batch (atomicidade total)
-    batch.set(refReposicao(), {
-      produtos: {},
-      ordem: [],
-      atualizadoEm: serverTimestamp()
-    });
+    // Apaga a lista no mesmo batch (atomicidade total).
+    // O listener percebe que ela sumiu e passa para a próxima lista aberta.
+    batch.delete(refReposicao());
     await batch.commit();
-
-    // Atualiza estado local imediatamente (listener confirmará depois)
-    estado.reposicao = {};
-    estado.ordemReposicao = [];
-    atualizarBannerReposicao();
-    atualizarCheckboxesVisuais();
 
     fecharModal("modalReposicao");
     showToast(`${itens.length} produto(s) descontado(s) do estoque!`, "✅");
@@ -1580,36 +1921,27 @@ async function finalizarReposicao() {
   }
 }
 
-// ── Limpar lista de reposição ─────────────────────────────────────
-async function limparReposicao() {
-  if (totalProdutosReposicao() === 0) return;
-  if (!confirm("Limpar toda a lista de reposição?")) return;
+// ── Excluir lista de reposição (sem descontar do estoque) ─────────
+async function excluirListaAtiva() {
+  const l = listaAtiva();
+  if (!l) return;
 
-  // Backup pra reverter em caso de erro
-  const backup      = { ...estado.reposicao };
-  const backupOrdem = [...estado.ordemReposicao];
+  const total = totalProdutosReposicao();
+  const msg = total > 0
+    ? `Excluir "${l.nome}" com ${total} produto(s)?\n\nNada será descontado do estoque.`
+    : `Excluir "${l.nome}"?`;
+  if (!confirm(msg)) return;
 
   // Marca como ação local pra o listener não disparar o toast de outro dispositivo
   estado.finalizandoLocal = true;
-
-  // Atualização otimista
-  estado.reposicao = {};
-  estado.ordemReposicao = [];
-  atualizarBannerReposicao();
-  atualizarCheckboxesVisuais();
   fecharModal("modalReposicao");
-  showToast("Lista limpa", "🗑️");
 
   try {
-    await limparReposicaoFirestore();
+    await deleteDoc(doc(window.db, LISTAS_COLLECTION, l.id));
+    showToast(`"${l.nome}" excluída`, "🗑️");
   } catch (err) {
-    // Reverte em caso de erro
     estado.finalizandoLocal = false;
-    estado.reposicao = backup;
-    estado.ordemReposicao = backupOrdem;
-    atualizarBannerReposicao();
-    atualizarCheckboxesVisuais();
-    showToast("Erro ao limpar lista", "❌");
+    showToast("Erro ao excluir lista", "❌");
     console.error(err);
   }
 }
@@ -1993,6 +2325,7 @@ document.querySelectorAll(".chip-loja").forEach(btn => {
   btn.addEventListener("click", () => trocarLoja(btn.dataset.loja));
 });
 atualizarBotoesLoja();
+renderizarSeletorListas();
 
 // Desenha os locais com os valores padrão enquanto o Firestore não responde
 // (o listener substitui assim que os dados reais chegam)
@@ -2010,6 +2343,8 @@ document.getElementById("btnCancelarEditar").addEventListener("click", () => {
 document.getElementById("btnSalvarEditar").addEventListener("click", window.salvarEdicao);
 document.getElementById("btnScanEditar").addEventListener("click", window.alternarScannerEditar);
 document.getElementById("btnScanAdd").addEventListener("click", window.alternarScannerAdd);
+document.getElementById("inputEditarFoto").addEventListener("change", escolherFotoEditar);
+document.getElementById("btnRemoverFoto").addEventListener("click", removerFotoEditar);
 
 document.getElementById("btnCancelarAjuste").addEventListener("click", () => fecharModal("modalRemoverQtd"));
 document.getElementById("btnAjusteAdd").addEventListener("click", () => confirmarAjusteQtd("add"));
@@ -2024,7 +2359,8 @@ document.getElementById("btnFecharReposicao").addEventListener("click", () => fe
 document.getElementById("btnImprimirLista").addEventListener("click", imprimirLista);
 document.getElementById("btnCompartilharLista").addEventListener("click", compartilharLista);
 document.getElementById("btnFinalizarReposicao").addEventListener("click", finalizarReposicao);
-document.getElementById("btnLimparReposicao").addEventListener("click", limparReposicao);
+document.getElementById("btnLimparReposicao").addEventListener("click", excluirListaAtiva);
+document.getElementById("btnRenomearLista").addEventListener("click", renomearListaAtiva);
 
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
