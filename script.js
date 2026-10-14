@@ -64,6 +64,41 @@ const LOJA_PADRAO   = "orionth";
 const STORAGE_LOJA  = "lojaAtiva";   // guarda a loja ativa por dispositivo
 const STORAGE_LISTA = "listaAtiva_"; // + id da loja: lista ativa por dispositivo
 
+// Produtos cadastrados antes da divisão por loja têm só "quantidade":
+// ela é contada inteira nesta loja até o produto ser alterado pela 1ª vez.
+const LOJA_MIGRACAO_QTD = "orionth";
+
+// Quantidade de cada loja de um produto: { orionth: 4, orion: 5 }
+function qtdLojasDe(produto) {
+  const r = {};
+  LOJAS.forEach(l => { r[l.id] = 0; });
+  const q = produto && produto.qtdLojas;
+  if (q && typeof q === "object") {
+    LOJAS.forEach(l => { r[l.id] = Math.max(0, Number(q[l.id]) || 0); });
+  } else {
+    r[LOJA_MIGRACAO_QTD] = Math.max(0, Number(produto && produto.quantidade) || 0);
+  }
+  return r;
+}
+
+function qtdNaLoja(produto, lojaId) {
+  return qtdLojasDe(produto)[lojaId] || 0;
+}
+
+function qtdTotal(produto) {
+  return Object.values(qtdLojasDe(produto)).reduce((a, b) => a + b, 0);
+}
+
+// Campos a gravar no produto. "quantidade" continua guardando o TOTAL.
+function camposQuantidade(qtdLojas) {
+  const limpo = {};
+  LOJAS.forEach(l => { limpo[l.id] = Math.max(0, Number(qtdLojas[l.id]) || 0); });
+  return {
+    qtdLojas:   limpo,
+    quantidade: Object.values(limpo).reduce((a, b) => a + b, 0)
+  };
+}
+
 // ID do documento ANTIGO (uma lista só por loja) — usado só na migração
 function docReposicaoLegadoId(lojaId) {
   return `listaReposicao_${lojaId}`;
@@ -358,7 +393,7 @@ function trocarLoja(lojaId) {
   atualizarBotoesLoja();
   renderizarSeletorListas();
   atualizarBannerReposicao();
-  atualizarCheckboxesVisuais();
+  renderizarLista(produtosFiltrados());
 
   // Reinicia o listener apontando para as listas da nova loja
   iniciarListenerReposicao(true);
@@ -739,7 +774,7 @@ function atualizarBannerReposicao() {
 
 async function toggleReposicao(produtoId, estoqueAtual) {
   if (estoqueAtual <= 0) {
-    showToast("Produto sem estoque no depósito", "⚠️");
+    showToast(`Produto sem estoque na ${nomeLoja(estado.lojaAtiva)}`, "⚠️");
     return;
   }
 
@@ -916,10 +951,11 @@ async function mostrarProdutos() {
       const produtosLista = lista.produtos || {};
       for (const id of Object.keys(produtosLista)) {
         const prod = estado.todosProdutos.find(p => p.id === id);
-        if (!prod || Number(prod.quantidade) <= 0) {
+        const naLoja = prod ? qtdNaLoja(prod, lista.loja) : 0;
+        if (!prod || naLoja <= 0) {
           ajustesReposicao.push({ listaId: lista.id, id, acao: "remover" });
-        } else if (produtosLista[id] > Number(prod.quantidade)) {
-          ajustesReposicao.push({ listaId: lista.id, id, acao: "ajustar", qtd: Number(prod.quantidade) });
+        } else if (produtosLista[id] > naLoja) {
+          ajustesReposicao.push({ listaId: lista.id, id, acao: "ajustar", qtd: naLoja });
         }
       }
     }
@@ -954,6 +990,8 @@ function renderizarLista(produtos) {
 
   let totalProdutos = 0;
   let totalItens    = 0;
+  const totaisLoja  = {};
+  LOJAS.forEach(l => { totaisLoja[l.id] = 0; });
 
   if (produtos.length === 0) {
     lista.innerHTML = `
@@ -964,12 +1002,25 @@ function renderizarLista(produtos) {
   }
 
   produtos.forEach((produto) => {
-    const quantidade   = Number(produto.quantidade) || 0;
+    const qtdLojas     = qtdLojasDe(produto);
+    const total        = qtdTotal(produto);
+    // Quantidade da loja selecionada: é nela que os botões +/− mexem
+    const quantidade   = qtdLojas[estado.lojaAtiva] || 0;
     // Usa a miniatura; se o produto ainda não foi migrado, cai na foto antiga.
     const imagem       = produto.thumb || produto.imagem || "https://placehold.co/52x52/1a1a24/8888aa?text=?";
-    const estoqueClass = quantidade <= LIMITE_ESTOQUE_BAIXO ? "estoque-baixo" : "";
-    const estoqueLabel = quantidade <= LIMITE_ESTOQUE_BAIXO ? `⚠️ ${quantidade}` : quantidade;
-    const ariaEstoque  = quantidade <= LIMITE_ESTOQUE_BAIXO ? " (estoque baixo)" : "";
+    // Uma "pílula" por loja (a selecionada fica destacada) + o total
+    const pilulasLojas = LOJAS.map(l => {
+      const q      = qtdLojas[l.id] || 0;
+      const baixo  = q <= LIMITE_ESTOQUE_BAIXO;
+      const classes = ["qtd-loja"];
+      if (l.id === estado.lojaAtiva) classes.push("qtd-loja-ativa");
+      if (baixo) classes.push("estoque-baixo");
+      const dica = l.id === estado.lojaAtiva
+        ? `Quantidade na ${l.nome}${baixo ? " (estoque baixo)" : ""}`
+        : `Toque para trocar para a ${l.nome}`;
+      return `<button type="button" class="${classes.join(" ")}" data-loja="${l.id}" title="${dica}">${l.nome}: <strong>${baixo ? "⚠️ " : ""}${q}</strong></button>`;
+    }).join("");
+    const ariaQtd = LOJAS.map(l => `${l.nome} ${qtdLojas[l.id] || 0}`).join(", ") + `, total ${total}`;
 
     const barcodeTag = produto.codigoBarras
       ? `<span class="barcode-tag" title="Código de barras">⬛ ${produto.codigoBarras}</span>`
@@ -1000,16 +1051,16 @@ function renderizarLista(produtos) {
            onerror="this.src='https://placehold.co/52x52/1a1a24/8888aa?text=?'">
       <div class="produto-info">
         <span class="nome-produto">${produto.nome}</span>
-        <span class="quantidade-produto ${estoqueClass}"
-              aria-label="Quantidade: ${quantidade}${ariaEstoque}">
-          Quantidade: ${estoqueLabel}
+        <span class="quantidade-produto quantidade-lojas" aria-label="Quantidade: ${ariaQtd}">
+          ${pilulasLojas}
+          <span class="qtd-total">Total: <strong>${total}</strong></span>
         </span>
         <span class="produto-tags">${barcodeTag}${localTag}</span>
       </div>
       <div class="acoes">
-        <button class="btn-acao btn-mais"      title="Adicionar 1"        aria-label="Adicionar 1 unidade de ${produto.nome}">+</button>
-        <button class="btn-acao btn-menos"     title="Remover 1"          aria-label="Remover 1 unidade de ${produto.nome}">−</button>
-        <button class="btn-acao btn-minus-qtd" title="Ajustar quantidade" aria-label="Ajustar quantidade de ${produto.nome}">−N</button>
+        <button class="btn-acao btn-mais"      title="Adicionar 1 na ${nomeLoja(estado.lojaAtiva)}"        aria-label="Adicionar 1 unidade de ${produto.nome} na ${nomeLoja(estado.lojaAtiva)}">+</button>
+        <button class="btn-acao btn-menos"     title="Remover 1 da ${nomeLoja(estado.lojaAtiva)}"          aria-label="Remover 1 unidade de ${produto.nome} da ${nomeLoja(estado.lojaAtiva)}">−</button>
+        <button class="btn-acao btn-minus-qtd" title="Ajustar quantidade na ${nomeLoja(estado.lojaAtiva)}" aria-label="Ajustar quantidade de ${produto.nome} na ${nomeLoja(estado.lojaAtiva)}">−N</button>
         <button class="btn-acao btn-editar"    title="Editar produto"     aria-label="Editar ${produto.nome}">✏️</button>
         <button class="btn-acao btn-remover"   title="Excluir produto"    aria-label="Excluir ${produto.nome}">🗑</button>
       </div>
@@ -1020,10 +1071,17 @@ function renderizarLista(produtos) {
       toggleReposicao(produto.id, quantidade);
     });
     li.querySelector(".img-produto").addEventListener("click", () => abrirModalFoto(produto.id, imagem));
-    li.querySelector(".btn-mais").addEventListener("click", () => aumentar(produto.id, quantidade));
-    li.querySelector(".btn-menos").addEventListener("click", () => diminuir(produto.id, quantidade));
+    // Tocar no nome/quantidade de uma loja troca a loja selecionada
+    li.querySelectorAll(".qtd-loja").forEach(pill => {
+      pill.addEventListener("click", (e) => {
+        e.stopPropagation();
+        trocarLoja(pill.dataset.loja);
+      });
+    });
+    li.querySelector(".btn-mais").addEventListener("click", () => aumentar(produto));
+    li.querySelector(".btn-menos").addEventListener("click", () => diminuir(produto));
     li.querySelector(".btn-minus-qtd").addEventListener("click", () =>
-      abrirModalRemoverQtd(produto.id, produto.nome, quantidade)
+      abrirModalRemoverQtd(produto)
     );
     li.querySelector(".btn-editar").addEventListener("click", () =>
       abrirModalEditar(produto)
@@ -1034,11 +1092,16 @@ function renderizarLista(produtos) {
 
     lista.appendChild(li);
     totalProdutos++;
-    totalItens += quantidade;
+    totalItens += total;
+    LOJAS.forEach(l => { totaisLoja[l.id] += qtdLojas[l.id] || 0; });
   });
 
   document.getElementById("totalProdutos").textContent = totalProdutos;
   document.getElementById("totalItens").textContent    = totalItens;
+  LOJAS.forEach(l => {
+    const el = document.getElementById(`totalItens_${l.id}`);
+    if (el) el.textContent = totaisLoja[l.id];
+  });
 }
 
 window.mostrarProdutos = mostrarProdutos;
@@ -1218,15 +1281,23 @@ async function criarLocalPeloModal() {
 
 window.adicionarProduto = async function () {
   const nome         = document.getElementById("nomeProduto").value.trim();
-  const quantidade   = parseInt(document.getElementById("quantidadeProduto").value);
+  // Quantidade inicial de cada loja (campo vazio = 0)
+  const qtdInicial = {};
+  let qtdInvalida  = false;
+  document.querySelectorAll(".input-qtd-nova").forEach(inp => {
+    const v = inp.value.trim() === "" ? 0 : parseInt(inp.value, 10);
+    if (isNaN(v) || v < 0) qtdInvalida = true;
+    qtdInicial[inp.dataset.loja] = isNaN(v) ? 0 : v;
+  });
+  const quantidade = Object.values(qtdInicial).reduce((a, b) => a + b, 0);
   const codigoBarras = document.getElementById("codigoBarrasProduto").value.trim();
   const estoqueLocal = document.getElementById("estoqueProduto").value;
   const btn          = document.getElementById("btnAdicionar");
   const spinner      = document.getElementById("btnSpinner");
   const btnText      = document.getElementById("btnText");
 
-  if (!nome || isNaN(quantidade) || quantidade < 1) {
-    showToast("Preencha o nome e a quantidade corretamente", "⚠️");
+  if (!nome || qtdInvalida || quantidade < 1) {
+    showToast("Preencha o nome e a quantidade de pelo menos uma loja", "⚠️");
     return;
   }
 
@@ -1261,7 +1332,7 @@ window.adicionarProduto = async function () {
     // O documento do produto guarda só a miniatura (leve, usada na lista).
     const ref = await addDoc(collection(window.db, "produtos"), {
       nome,
-      quantidade,
+      ...camposQuantidade(qtdInicial),
       thumb: estado.imagemThumb || "",
       codigoBarras: codigoBarras || "",
       estoque: estoqueLocal || ""
@@ -1282,7 +1353,7 @@ window.adicionarProduto = async function () {
     }
 
     document.getElementById("nomeProduto").value         = "";
-    document.getElementById("quantidadeProduto").value   = "";
+    document.querySelectorAll(".input-qtd-nova").forEach(inp => { inp.value = ""; });
     document.getElementById("codigoBarrasProduto").value = "";
     document.getElementById("estoqueProduto").value      = "";
     pararScannerGenerico(estado.scannerAdd, "scannerAreaAdd", "btnScanAdd");
@@ -1299,33 +1370,47 @@ window.adicionarProduto = async function () {
   }
 };
 
-// ── Quantidade ───────────────────────────────────────────────────
-async function aumentar(id, quantidade) {
+// ── Quantidade (sempre na loja selecionada) ──────────────────────
+async function alterarQtdLoja(produto, lojaId, novaQtdLoja) {
+  const novo = qtdLojasDe(produto);
+  novo[lojaId] = Math.max(0, novaQtdLoja);
+  await updateDoc(doc(window.db, "produtos", produto.id), camposQuantidade(novo));
+}
+
+async function aumentar(produto) {
+  const loja = estado.lojaAtiva;
   showLoading("Atualizando...");
   try {
-    await updateDoc(doc(window.db, "produtos", id), { quantidade: quantidade + 1 });
+    await alterarQtdLoja(produto, loja, qtdNaLoja(produto, loja) + 1);
     await mostrarProdutos();
   } catch (err) {
     showToast("Erro ao atualizar", "❌");
+    console.error(err);
     hideLoading();
   }
 }
 
-async function diminuir(id, quantidade) {
-  if (quantidade <= 0) { showToast("Quantidade já é zero", "⚠️"); return; }
+async function diminuir(produto) {
+  const loja = estado.lojaAtiva;
+  const atual = qtdNaLoja(produto, loja);
+  if (atual <= 0) { showToast(`Quantidade na ${nomeLoja(loja)} já é zero`, "⚠️"); return; }
   showLoading("Atualizando...");
   try {
-    await updateDoc(doc(window.db, "produtos", id), { quantidade: quantidade - 1 });
+    await alterarQtdLoja(produto, loja, atual - 1);
     await mostrarProdutos();
   } catch (err) {
     showToast("Erro ao atualizar", "❌");
+    console.error(err);
     hideLoading();
   }
 }
 
-function abrirModalRemoverQtd(id, nome, qtdAtual) {
-  estado.produtoAtual = { id, nome, qtd: qtdAtual };
-  document.getElementById("modalRemoverAtual").textContent = qtdAtual;
+function abrirModalRemoverQtd(produto) {
+  const loja = estado.lojaAtiva;
+  const qtd  = qtdNaLoja(produto, loja);
+  estado.produtoAtual = { id: produto.id, nome: produto.nome, qtd, loja, produto };
+  document.getElementById("modalRemoverAtual").textContent = qtd;
+  atualizarBotoesLoja(); // atualiza o nome da loja no texto do modal
   document.getElementById("inputRemoverQtd").value = "";
   abrirModal("modalRemoverQtd");
 }
@@ -1343,7 +1428,7 @@ async function confirmarAjusteQtd(tipo) {
   }
 
   if (tipo === "rem" && qtd > estado.produtoAtual.qtd) {
-    showToast(`Estoque atual é só ${estado.produtoAtual.qtd}`, "⚠️");
+    showToast(`Estoque na ${nomeLoja(estado.produtoAtual.loja)} é só ${estado.produtoAtual.qtd}`, "⚠️");
     return;
   }
 
@@ -1361,12 +1446,12 @@ async function confirmarAjusteQtd(tipo) {
     : estado.produtoAtual.qtd - qtd;
 
   try {
-    await updateDoc(doc(window.db, "produtos", estado.produtoAtual.id), { quantidade: novaQtd });
+    await alterarQtdLoja(estado.produtoAtual.produto, estado.produtoAtual.loja, novaQtd);
     fecharModal("modalRemoverQtd");
     showToast(
       isAdd
-        ? `+${qtd} adicionado(s) a "${estado.produtoAtual.nome}"`
-        : `−${qtd} removido(s) de "${estado.produtoAtual.nome}"`
+        ? `+${qtd} em "${estado.produtoAtual.nome}" (${nomeLoja(estado.produtoAtual.loja)})`
+        : `−${qtd} de "${estado.produtoAtual.nome}" (${nomeLoja(estado.produtoAtual.loja)})`
     );
     await mostrarProdutos();
   } catch (err) {
@@ -1385,6 +1470,12 @@ function abrirModalEditar(produto) {
   document.getElementById("inputEditarNome").value    = produto.nome;
   document.getElementById("inputEditarBarcode").value = produto.codigoBarras || "";
   document.getElementById("inputEditarEstoque").value = produto.estoque || "";
+
+  // Quantidade de cada loja
+  const qtdLojas = qtdLojasDe(produto);
+  document.querySelectorAll(".input-qtd-editar").forEach(inp => {
+    inp.value = qtdLojas[inp.dataset.loja] ?? 0;
+  });
 
   // Foto atual (miniatura) — pode ser trocada ou removida
   estado.editarFoto = { thumb: "", full: "", alterada: false, remover: false, carregando: false };
@@ -1462,6 +1553,15 @@ window.salvarEdicao = async function () {
     return;
   }
 
+  const novasQtds = {};
+  let qtdInvalida = false;
+  document.querySelectorAll(".input-qtd-editar").forEach(inp => {
+    const v = inp.value.trim() === "" ? 0 : parseInt(inp.value, 10);
+    if (isNaN(v) || v < 0) qtdInvalida = true;
+    novasQtds[inp.dataset.loja] = isNaN(v) ? 0 : v;
+  });
+  if (qtdInvalida) { showToast("Quantidade inválida", "⚠️"); return; }
+
   const btn     = document.querySelector("#modalEditar .btn-modal-confirm");
   const spinner = document.getElementById("spinnerEditar");
   const texto   = document.getElementById("textoSalvar");
@@ -1479,7 +1579,8 @@ window.salvarEdicao = async function () {
     const dados = {
       nome: novoNome,
       codigoBarras: novoBarcode,
-      estoque: novoEstoque || ""
+      estoque: novoEstoque || "",
+      ...camposQuantidade(novasQtds)
     };
     if (foto.alterada || foto.remover) {
       dados.thumb  = foto.alterada ? foto.thumb : "";
@@ -1653,7 +1754,7 @@ function renderizarModalReposicao() {
     .filter(p => p);
 
   itens.forEach((produto, index) => {
-    const estoque    = Number(produto.quantidade) || 0;
+    const estoque    = qtdNaLoja(produto, estado.lojaAtiva);
     const aLevar     = estado.reposicao[produto.id];
     const imagem     = produto.thumb || produto.imagem || "https://placehold.co/40x40/1a1a24/8888aa?text=?";
     const barcode    = produto.codigoBarras ? `⬛ ${produto.codigoBarras}` : "(sem código)";
@@ -1780,7 +1881,7 @@ function imprimirLista() {
     .filter(p => p);
 
   itens.forEach((produto, index) => {
-    const estoque = Number(produto.quantidade) || 0;
+    const estoque = qtdNaLoja(produto, estado.lojaAtiva);
     const aLevar  = estado.reposicao[produto.id];
     const barcode = produto.codigoBarras || "—";
     const local   = rotuloEstoque(produto.estoque) || "—";
@@ -1824,7 +1925,7 @@ async function compartilharLista() {
 
   let texto = `🛒 *${nomeListaAtiva()} · ${nomeLoja(estado.lojaAtiva)}*\n_Gerada em ${dataFmt}_\n\n`;
   itens.forEach((produto, index) => {
-    const estoque = Number(produto.quantidade) || 0;
+    const estoque = qtdNaLoja(produto, estado.lojaAtiva);
     const aLevar  = estado.reposicao[produto.id];
     const barcode = produto.codigoBarras ? ` (${produto.codigoBarras})` : "";
     const local   = rotuloEstoque(produto.estoque);
@@ -1879,7 +1980,7 @@ async function finalizarReposicao() {
     .join("\n");
 
   const confirma = confirm(
-    `Confirmar saída do depósito?\n\nVai ser descontado do estoque:\n${resumo}\n\nEssa ação não pode ser desfeita.`
+    `Confirmar saída?\n\nVai ser descontado do estoque da ${nomeLoja(estado.lojaAtiva)}:\n${resumo}\n\nEssa ação não pode ser desfeita.`
   );
 
   if (!confirma) return;
@@ -1898,9 +1999,12 @@ async function finalizarReposicao() {
 
     // Faz tudo numa única operação atômica (batch): desconta estoque + limpa lista
     const batch = writeBatch(window.db);
+    // Desconta da quantidade da loja desta lista
+    const lojaLista = estado.lojaAtiva;
     itens.forEach(({ id, qtdLevar, produto }) => {
-      const novoEstoque = Math.max(0, (Number(produto.quantidade) || 0) - qtdLevar);
-      batch.update(doc(window.db, "produtos", id), { quantidade: novoEstoque });
+      const novo = qtdLojasDe(produto);
+      novo[lojaLista] = Math.max(0, (novo[lojaLista] || 0) - qtdLevar);
+      batch.update(doc(window.db, "produtos", id), camposQuantidade(novo));
     });
     // Apaga a lista no mesmo batch (atomicidade total).
     // O listener percebe que ela sumiu e passa para a próxima lista aberta.

@@ -61,6 +61,18 @@
         <button class="btn-scan" id="btnScanEditar" title="Usar câmera">📷</button>
       </div>
 
+      <!-- Quantidade em cada loja (permite corrigir direto) -->
+      <div class="qtd-lojas-form">
+        <label class="qtd-loja-campo">
+          <span>Qtd. Orion TH</span>
+          <input type="number" class="input-qtd-editar" data-loja="orionth" min="0" inputmode="numeric">
+        </label>
+        <label class="qtd-loja-campo">
+          <span>Qtd. Orion</span>
+          <input type="number" class="input-qtd-editar" data-loja="orion" min="0" inputmode="numeric">
+        </label>
+      </div>
+
       <!-- Opções geradas dinamicamente pelo script -->
       <select id="inputEditarEstoque" class="select-estoque">
         <option value="">📍 Sem local definido</option>
@@ -86,7 +98,7 @@
   <div class="modal-overlay" id="modalRemoverQtd">
     <div class="modal-box">
       <h3 class="modal-titulo">📦 Ajustar Quantidade</h3>
-      <p class="modal-desc">Estoque atual: <strong id="modalRemoverAtual">0</strong></p>
+      <p class="modal-desc">Estoque na <strong class="loja-ativa-nome">Orion TH</strong>: <strong id="modalRemoverAtual">0</strong></p>
       <input type="number" id="inputRemoverQtd" placeholder="Digite a quantidade" min="1">
       <div class="ajuste-btns">
         <button class="btn-ajuste btn-ajuste-add" id="btnAjusteAdd">
@@ -236,7 +248,17 @@
       <h2>Novo Produto</h2>
       <div class="formulario">
         <input type="text" id="nomeProduto" placeholder="Nome do produto">
-        <input type="number" id="quantidadeProduto" placeholder="Quantidade inicial" min="1">
+        <!-- Quantidade inicial em cada loja -->
+        <div class="qtd-lojas-form">
+          <label class="qtd-loja-campo">
+            <span>Qtd. Orion TH</span>
+            <input type="number" class="input-qtd-nova" data-loja="orionth" placeholder="0" min="0" inputmode="numeric">
+          </label>
+          <label class="qtd-loja-campo">
+            <span>Qtd. Orion</span>
+            <input type="number" class="input-qtd-nova" data-loja="orion" placeholder="0" min="0" inputmode="numeric">
+          </label>
+        </div>
 
         <div class="busca-wrap campo-com-cam">
           <input type="text" id="codigoBarrasProduto" placeholder="Código de barras" inputmode="numeric">
@@ -293,6 +315,14 @@
         <div class="resumo-item">
           <div class="resumo-label">Total de itens</div>
           <div class="resumo-valor" id="totalItens">—</div>
+        </div>
+        <div class="resumo-item">
+          <div class="resumo-label">Orion TH</div>
+          <div class="resumo-valor" id="totalItens_orionth">—</div>
+        </div>
+        <div class="resumo-item">
+          <div class="resumo-label">Orion</div>
+          <div class="resumo-valor" id="totalItens_orion">—</div>
         </div>
       </div>
     </div>
