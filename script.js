@@ -89,6 +89,12 @@ function qtdTotal(produto) {
   return Object.values(qtdLojasDe(produto)).reduce((a, b) => a + b, 0);
 }
 
+// Lojas (diferentes da informada) que têm o produto: ["Orion"]
+function outrasLojasComEstoque(produto, lojaId) {
+  const q = qtdLojasDe(produto);
+  return LOJAS.filter(l => l.id !== lojaId && q[l.id] > 0).map(l => l.nome);
+}
+
 // Campos a gravar no produto. "quantidade" continua guardando o TOTAL.
 function camposQuantidade(qtdLojas) {
   const limpo = {};
@@ -772,12 +778,8 @@ function atualizarBannerReposicao() {
   }
 }
 
-async function toggleReposicao(produtoId, estoqueAtual) {
-  if (estoqueAtual <= 0) {
-    showToast(`Produto sem estoque na ${nomeLoja(estado.lojaAtiva)}`, "⚠️");
-    return;
-  }
-
+// Produtos com estoque zerado na loja também podem entrar na lista.
+async function toggleReposicao(produtoId) {
   // Nenhuma lista aberta nesta loja: cria uma já com este produto
   if (!listaAtiva()) {
     await criarNovaLista({ [produtoId]: 1 }, [produtoId]);
@@ -944,18 +946,15 @@ async function mostrarProdutos() {
     iniciarListenerReposicao();
     iniciarListenerLocais();
 
-    // Limpa das listas abertas qualquer produto que não existe mais OU que
-    // está sem estoque, e ajusta quantidades maiores que o estoque atual.
+    // Limpa das listas abertas qualquer produto que não existe mais.
+    // (Produtos com estoque zerado continuam na lista de propósito.)
     const ajustesReposicao = [];
     for (const lista of estado.listas) {
       const produtosLista = lista.produtos || {};
       for (const id of Object.keys(produtosLista)) {
         const prod = estado.todosProdutos.find(p => p.id === id);
-        const naLoja = prod ? qtdNaLoja(prod, lista.loja) : 0;
-        if (!prod || naLoja <= 0) {
+        if (!prod) {
           ajustesReposicao.push({ listaId: lista.id, id, acao: "remover" });
-        } else if (produtosLista[id] > naLoja) {
-          ajustesReposicao.push({ listaId: lista.id, id, acao: "ajustar", qtd: naLoja });
         }
       }
     }
@@ -1033,15 +1032,13 @@ function renderizarLista(produtos) {
     const marcado     = estado.reposicao[produto.id] !== undefined;
     const checkAtivo  = marcado ? "ativo" : "";
     const liMarcado   = marcado ? "produto-marcado" : "";
-    const semEstoque  = quantidade <= 0;
-    const checkDisabled = semEstoque ? "disabled" : "";
 
     const li = document.createElement("li");
     li.className = `produto-item ${liMarcado}`;
     li.dataset.produtoId = produto.id;
     li.innerHTML = `
       <button class="reposicao-check ${checkAtivo}" title="Adicionar à lista de reposição"
-              aria-label="Marcar ${produto.nome} para reposição" ${checkDisabled}>
+              aria-label="Marcar ${produto.nome} para reposição">
         <span class="reposicao-check-icone">✓</span>
       </button>
       <img src="${imagem}" class="img-produto"
@@ -1068,7 +1065,7 @@ function renderizarLista(produtos) {
 
     li.querySelector(".reposicao-check").addEventListener("click", (e) => {
       e.stopPropagation();
-      toggleReposicao(produto.id, quantidade);
+      toggleReposicao(produto.id);
     });
     li.querySelector(".img-produto").addEventListener("click", () => abrirModalFoto(produto.id, imagem));
     // Tocar no nome/quantidade de uma loja troca a loja selecionada
@@ -1758,9 +1755,20 @@ function renderizarModalReposicao() {
     const aLevar     = estado.reposicao[produto.id];
     const imagem     = produto.thumb || produto.imagem || "https://placehold.co/40x40/1a1a24/8888aa?text=?";
     const barcode    = produto.codigoBarras ? `⬛ ${produto.codigoBarras}` : "(sem código)";
-    const estoqueBx  = estoque <= LIMITE_ESTOQUE_BAIXO;
-    const estoqueLbl = estoqueBx ? `⚠️ ${estoque} un` : `${estoque} un`;
-    const estoqueCss = estoqueBx ? "estoque-baixo" : "";
+    // Estoque de cada loja (a loja da lista fica destacada)
+    const qtdLojas   = qtdLojasDe(produto);
+    const pilulas    = LOJAS.map(l => {
+      const q = qtdLojas[l.id] || 0;
+      const classes = ["qtd-loja-lista"];
+      if (l.id === estado.lojaAtiva) classes.push("qtd-loja-ativa");
+      if (q <= LIMITE_ESTOQUE_BAIXO) classes.push("estoque-baixo");
+      return `<span class="${classes.join(" ")}">${l.nome}: <strong>${q <= 0 ? "0" : q}</strong></span>`;
+    }).join("");
+    // Loja da lista sem estoque, mas a outra tem: avisa onde buscar
+    const outras     = estoque <= 0 ? outrasLojasComEstoque(produto, estado.lojaAtiva) : [];
+    const avisoOutra = outras.length
+      ? `<span class="tem-em-outra">📦 Tem na ${outras.join(" e na ")}</span>`
+      : "";
 
     const localTag = nomeEstoque(produto.estoque)
       ? `<span class="estoque-tag estoque-tag-${corEstoque(produto.estoque)}">📍 ${rotuloEstoque(produto.estoque)}</span>`
@@ -1783,8 +1791,8 @@ function renderizarModalReposicao() {
                 aria-label="Remover ${produto.nome} da lista">✕</button>
       </div>
       <div class="item-reposicao-controles">
-        <div class="item-reposicao-estoque ${estoqueCss}">
-          Estoque: <strong>${estoqueLbl}</strong>
+        <div class="item-reposicao-estoque">
+          ${pilulas}${avisoOutra}
         </div>
         <div class="item-reposicao-levar">
           <span class="levar-label">Levar:</span>
@@ -1836,7 +1844,8 @@ function renderizarModalReposicao() {
     });
 
     div.querySelector(".btn-qtd-mais").addEventListener("click", async () => {
-      if (estado.reposicao[produto.id] < estoque) {
+      // Sem limite pelo estoque: a lista pode pedir mais do que a loja tem
+      {
         const novaQtd = estado.reposicao[produto.id] + 1;
         estado.reposicao[produto.id] = novaQtd;
         renderizarModalReposicao();
@@ -1848,8 +1857,6 @@ function renderizarModalReposicao() {
           showToast("Erro ao atualizar", "❌");
           console.error(err);
         }
-      } else {
-        showToast(`Estoque máximo é ${estoque}`, "⚠️");
       }
     });
 
@@ -1900,7 +1907,7 @@ function imprimirLista() {
       <td>${produto.nome}</td>
       <td>${local}</td>
       <td>${barcode}</td>
-      <td>${estoque}</td>
+      <td class="td-estoque-lojas">${LOJAS.map(l => `${l.nome}: <strong>${qtdNaLoja(produto, l.id)}</strong>`).join("<br>")}</td>
       <td><strong>${aLevar}</strong></td>
     `;
     corpo.appendChild(tr);
@@ -1930,7 +1937,8 @@ async function compartilharLista() {
     const barcode = produto.codigoBarras ? ` (${produto.codigoBarras})` : "";
     const local   = rotuloEstoque(produto.estoque);
     const linhaLocal = local ? `   📍 ${local}\n` : "";
-    texto += `${index + 1}. *${produto.nome}*${barcode}\n${linhaLocal}   Estoque: ${estoque} un · *Levar: ${aLevar} un*\n\n`;
+    const estoqueLojas = LOJAS.map(l => `${l.nome} ${qtdNaLoja(produto, l.id)}`).join(" · ");
+    texto += `${index + 1}. *${produto.nome}*${barcode}\n${linhaLocal}   Estoque: ${estoqueLojas} · *Levar: ${aLevar} un*\n\n`;
   });
   texto += "_Estoque da Papelaria_";
 
