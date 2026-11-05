@@ -1311,15 +1311,11 @@ window.adicionarProduto = async function () {
     return;
   }
 
-  if (codigoBarras) {
-    const dupCodigo = estado.todosProdutos.find(
-      p => p.codigoBarras && p.codigoBarras === codigoBarras
-    );
-    if (dupCodigo) {
-      showToast(`Código de barras já cadastrado em "${dupCodigo.nome}"`, "⚠️");
-      return;
-    }
-  }
+  // O mesmo código de barras pode ser usado em mais de um produto.
+  // Só guardamos o nome do outro produto para avisar depois de salvar.
+  const dupCodigo = codigoBarras
+    ? estado.todosProdutos.find(p => p.codigoBarras && p.codigoBarras === codigoBarras)
+    : null;
 
   btn.disabled = true;
   spinner.classList.add("ativo");
@@ -1355,7 +1351,11 @@ window.adicionarProduto = async function () {
     document.getElementById("estoqueProduto").value      = "";
     pararScannerGenerico(estado.scannerAdd, "scannerAreaAdd", "btnScanAdd");
     resetUpload();
-    showToast(`"${nome}" adicionado ao estoque!`);
+    if (dupCodigo) {
+      showToast(`"${nome}" adicionado (mesmo código de "${dupCodigo.nome}")`, "ℹ️");
+    } else {
+      showToast(`"${nome}" adicionado ao estoque!`);
+    }
     await mostrarProdutos();
   } catch (err) {
     showToast("Erro ao adicionar produto", "❌");
@@ -2202,7 +2202,7 @@ window.alternarScannerEditar = async function () {
         p => p.codigoBarras && p.codigoBarras === codigo && p.id !== estado.editarId
       );
       if (existente) {
-        showToast(`Código já cadastrado em "${existente.nome}"`, "⚠️");
+        showToast(`Código capturado (também está em "${existente.nome}")`, "ℹ️");
       } else {
         showToast("Código capturado!", "✅");
       }
@@ -2226,7 +2226,7 @@ window.alternarScannerAdd = async function () {
         p => p.codigoBarras && p.codigoBarras === codigo
       );
       if (existente) {
-        showToast(`Código já cadastrado em "${existente.nome}"`, "⚠️");
+        showToast(`Código capturado (também está em "${existente.nome}")`, "ℹ️");
       } else {
         showToast("Código capturado!", "✅");
       }
