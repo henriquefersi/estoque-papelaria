@@ -184,9 +184,7 @@ const estado = {
   cacheImagens:     {},
   produtoAtual:     { id: null, nome: "", qtd: 0 },
   editarId:         null,
-  termoBusca:       "",          // texto da busca (já normalizado)
-  // Produto a destacar depois que a busca limpa sozinha: { id, ate: timestamp }
-  focarProduto:     null,
+  termoBusca:       "",          // texto da busca (normalizado) — continua ativo após alterações
   filtroEstoque:    "",          // "" = todos | "1".."4" = local | "sem" = sem local
   scannerBusca:     { stream: null, interval: null, ativo: false, zxingReader: null },
   scannerEditar:    { stream: null, interval: null, ativo: false, zxingReader: null },
@@ -1068,7 +1066,6 @@ function renderizarLista(produtos) {
     li.querySelector(".reposicao-check").addEventListener("click", (e) => {
       e.stopPropagation();
       toggleReposicao(produto.id);
-      if (limparBuscaAposAcao(produto.id)) renderizarLista(produtosFiltrados());
     });
     li.querySelector(".img-produto").addEventListener("click", () => abrirModalFoto(produto.id, imagem));
     // Tocar no nome/quantidade de uma loja troca a loja selecionada
@@ -1103,7 +1100,6 @@ function renderizarLista(produtos) {
     if (el) el.textContent = totaisLoja[l.id];
   });
 
-  focarProdutoSePreciso();
 }
 
 window.mostrarProdutos = mostrarProdutos;
@@ -1229,30 +1225,6 @@ function limparBusca() {
   document.getElementById("campoBusca").focus();
 }
 
-// Depois de mexer num produto achado pela busca: limpa a busca e, na
-// próxima renderização, rola a lista até ele e dá um destaque rápido.
-function limparBuscaAposAcao(produtoId) {
-  estado.focarProduto = null; // uma ação nova cancela o destaque anterior
-  if (!estado.termoBusca && !document.getElementById("campoBusca").value) return false;
-  esvaziarCampoBusca();
-  // Vale por alguns segundos: a lista pode ser redesenhada mais de uma vez
-  // (ex.: atualização do banco), e o destaque precisa sobreviver a isso.
-  estado.focarProduto = produtoId ? { id: produtoId, ate: Date.now() + 2500, rolou: false } : null;
-  return true;
-}
-
-function focarProdutoSePreciso() {
-  const f = estado.focarProduto;
-  if (!f) return;
-  if (Date.now() > f.ate) { estado.focarProduto = null; return; }
-  const li = lista.querySelector(`.produto-item[data-produto-id="${f.id}"]`);
-  if (!li) return;
-  // Na lista recém-desenhada o produto está numa posição nova: rola até ele
-  li.scrollIntoView({ block: "center", behavior: f.rolou ? "auto" : "smooth" });
-  f.rolou = true;
-  li.classList.add("produto-destaque");
-  setTimeout(() => li.classList.remove("produto-destaque"), 1800);
-}
 
 // Troca o filtro de local ativo e re-renderiza
 function aplicarFiltroEstoque(valor) {
@@ -1498,7 +1470,6 @@ async function alterarQtdLoja(produto, lojaId, novaQtdLoja) {
 
 async function aumentar(produto) {
   const loja = estado.lojaAtiva;
-  limparBuscaAposAcao(produto.id);
   showLoading("Atualizando...");
   try {
     await alterarQtdLoja(produto, loja, qtdNaLoja(produto, loja) + 1);
@@ -1514,7 +1485,6 @@ async function diminuir(produto) {
   const loja = estado.lojaAtiva;
   const atual = qtdNaLoja(produto, loja);
   if (atual <= 0) { showToast(`Quantidade na ${nomeLoja(loja)} já é zero`, "⚠️"); return; }
-  limparBuscaAposAcao(produto.id);
   showLoading("Atualizando...");
   try {
     await alterarQtdLoja(produto, loja, atual - 1);
@@ -1569,7 +1539,6 @@ async function confirmarAjusteQtd(tipo) {
   try {
     await alterarQtdLoja(estado.produtoAtual.produto, estado.produtoAtual.loja, novaQtd);
     fecharModal("modalRemoverQtd");
-    limparBuscaAposAcao(estado.produtoAtual.id);
     showToast(
       isAdd
         ? `+${qtd} em "${estado.produtoAtual.nome}" (${nomeLoja(estado.produtoAtual.loja)})`
@@ -1733,7 +1702,6 @@ window.salvarEdicao = async function () {
     }
 
     fecharModal("modalEditar");
-    limparBuscaAposAcao(id);
     showToast(`"${novoNome}" atualizado!`);
     await mostrarProdutos();
   } catch (err) {
@@ -1831,7 +1799,6 @@ async function remover(id, nome) {
       estado.ordemReposicao = estado.ordemReposicao.filter(x => x !== id);
     }
 
-    limparBuscaAposAcao(null);
     showToast(`"${nome}" removido`, "🗑️");
     await mostrarProdutos();
   } catch (err) {
