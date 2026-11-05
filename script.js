@@ -184,7 +184,9 @@ const estado = {
   cacheImagens:     {},
   produtoAtual:     { id: null, nome: "", qtd: 0 },
   editarId:         null,
-  termoBusca:       "",          // mantém o filtro ativo após alterações
+  termoBusca:       "",          // texto da busca (já normalizado)
+  // Produto a destacar depois que a busca limpa sozinha: { id, ate: timestamp }
+  focarProduto:     null,
   filtroEstoque:    "",          // "" = todos | "1".."4" = local | "sem" = sem local
   scannerBusca:     { stream: null, interval: null, ativo: false, zxingReader: null },
   scannerEditar:    { stream: null, interval: null, ativo: false, zxingReader: null },
@@ -1066,6 +1068,7 @@ function renderizarLista(produtos) {
     li.querySelector(".reposicao-check").addEventListener("click", (e) => {
       e.stopPropagation();
       toggleReposicao(produto.id);
+      if (limparBuscaAposAcao(produto.id)) renderizarLista(produtosFiltrados());
     });
     li.querySelector(".img-produto").addEventListener("click", () => abrirModalFoto(produto.id, imagem));
     // Tocar no nome/quantidade de uma loja troca a loja selecionada
@@ -1099,16 +1102,82 @@ function renderizarLista(produtos) {
     const el = document.getElementById(`totalItens_${l.id}`);
     if (el) el.textContent = totaisLoja[l.id];
   });
+
+  focarProdutoSePreciso();
 }
 
 window.mostrarProdutos = mostrarProdutos;
 
-// Aplica os dois filtros (busca + local de estoque) sobre a lista completa
+// ── Busca tolerante ──────────────────────────────────────────────
+// Ignora acentos, maiúsculas e pontuação: "Lápis Nº 2" → "lapis no 2"
+function normalizarBusca(txt) {
+  return String(txt || "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+// Distância de edição limitada (para tolerar 1 letra errada/trocada)
+function distanciaAte1(a, b) {
+  if (a === b) return 0;
+  if (Math.abs(a.length - b.length) > 1) return 2;
+  let i = 0;
+  while (i < a.length && i < b.length && a[i] === b[i]) i++;
+  const restoA = a.slice(i), restoB = b.slice(i);
+  // troca de 1 letra, letra a mais, letra a menos, ou duas letras invertidas
+  if (restoA.slice(1) === restoB.slice(1)) return 1;
+  if (restoA.slice(1) === restoB || restoA === restoB.slice(1)) return 1;
+  if (restoA.length >= 2 && restoA[0] === restoB[1] && restoA[1] === restoB[0]
+      && restoA.slice(2) === restoB.slice(2)) return 1;
+  return 2;
+}
+
+// Texto normalizado de cada produto (calculado uma vez por carregamento)
+const cacheBusca = new WeakMap();
+function textoBuscaProduto(p) {
+  let c = cacheBusca.get(p);
+  if (!c) {
+    const nome = normalizarBusca(p.nome);
+    c = { nome, palavras: nome.split(" ").filter(Boolean) };
+    cacheBusca.set(p, c);
+  }
+  return c;
+}
+
+// 2 = todas as palavras batem exatamente | 1 = bate com errinho | 0 = não bate
+function pontuarBusca(p, palavrasBusca) {
+  const { nome, palavras } = textoBuscaProduto(p);
+  const codigo = String(p.codigoBarras || "");
+  let exato = true;
+
+  for (const w of palavrasBusca) {
+    if (nome.includes(w)) continue;
+    if (/^\d+$/.test(w) && codigo.includes(w)) continue;
+    // plural: "canetas" acha "caneta"
+    if (w.length > 3 && w.endsWith("s") && nome.includes(w.slice(0, -1))) continue;
+    // 1 letra errada (só em palavras de 4+ letras, pra não achar coisa demais)
+    if (w.length >= 4 && palavras.some(pal =>
+          distanciaAte1(w, pal) <= 1 ||
+          (pal.length > w.length && distanciaAte1(w, pal.slice(0, w.length)) <= 1))) {
+      exato = false;
+      continue;
+    }
+    return 0;
+  }
+  return exato ? 2 : 1;
+}
+
+// Aplica os dois filtros (busca + local de estoque) sobre a lista completa.
+// Com busca: os que batem exatamente vêm primeiro, os com errinho depois.
 function produtosFiltrados() {
   const termo  = estado.termoBusca;
   const filtro = estado.filtroEstoque;
+  const palavrasBusca = termo ? termo.split(" ").filter(Boolean) : [];
+  const pontos = new Map();
 
-  return estado.todosProdutos.filter(p => {
+  const resultado = estado.todosProdutos.filter(p => {
     // Filtro por local de estoque
     if (filtro === "sem") {
       if (nomeEstoque(p.estoque)) return false;
@@ -1117,20 +1186,73 @@ function produtosFiltrados() {
     }
 
     // Filtro por termo de busca (nome ou código de barras)
-    if (termo) {
-      const casaNome    = p.nome.toLowerCase().includes(termo);
-      const casaCodigo  = p.codigoBarras && p.codigoBarras.includes(termo);
-      if (!casaNome && !casaCodigo) return false;
+    if (palavrasBusca.length) {
+      const pt = pontuarBusca(p, palavrasBusca);
+      if (!pt) return false;
+      pontos.set(p, pt);
     }
 
     return true;
   });
+
+  if (palavrasBusca.length) {
+    resultado.sort((a, b) => pontos.get(b) - pontos.get(a)); // sort estável
+  }
+  return resultado;
 }
 
 window.filtrarProdutos = function () {
-  estado.termoBusca = document.getElementById("campoBusca").value.trim().toLowerCase();
+  const campo = document.getElementById("campoBusca");
+  estado.termoBusca = normalizarBusca(campo.value);
+  atualizarBotaoLimparBusca();
   renderizarLista(produtosFiltrados());
 };
+
+// Mostra o ✕ só quando há algo escrito
+function atualizarBotaoLimparBusca() {
+  const campo = document.getElementById("campoBusca");
+  const btn   = document.getElementById("btnLimparBusca");
+  if (btn) btn.style.display = campo.value ? "flex" : "none";
+}
+
+// Esvazia a caixa de busca (sem redesenhar a lista)
+function esvaziarCampoBusca() {
+  document.getElementById("campoBusca").value = "";
+  estado.termoBusca = "";
+  atualizarBotaoLimparBusca();
+}
+
+// ✕ da caixa de busca: limpa e volta a lista completa
+function limparBusca() {
+  esvaziarCampoBusca();
+  renderizarLista(produtosFiltrados());
+  document.getElementById("campoBusca").focus();
+}
+
+// Depois de mexer num produto achado pela busca: limpa a busca e, na
+// próxima renderização, rola a lista até ele e dá um destaque rápido.
+function limparBuscaAposAcao(produtoId) {
+  estado.focarProduto = null; // uma ação nova cancela o destaque anterior
+  if (!estado.termoBusca && !document.getElementById("campoBusca").value) return false;
+  esvaziarCampoBusca();
+  // Vale por alguns segundos: a lista pode ser redesenhada mais de uma vez
+  // (ex.: atualização do banco), e o destaque precisa sobreviver a isso.
+  estado.focarProduto = produtoId ? { id: produtoId, ate: Date.now() + 2500, rolou: false } : null;
+  return true;
+}
+
+function focarProdutoSePreciso() {
+  const f = estado.focarProduto;
+  if (!f) return;
+  if (Date.now() > f.ate) { estado.focarProduto = null; return; }
+  const li = lista.querySelector(`.produto-item[data-produto-id="${f.id}"]`);
+  if (!li) return;
+  // Na lista recém-desenhada o produto está numa posição nova: rola até ele
+  li.scrollIntoView({ block: "center", behavior: f.rolou ? "auto" : "smooth" });
+  f.rolou = true;
+  li.classList.add("produto-destaque");
+  setTimeout(() => li.classList.remove("produto-destaque"), 1800);
+}
 
 // Troca o filtro de local ativo e re-renderiza
 function aplicarFiltroEstoque(valor) {
@@ -1376,6 +1498,7 @@ async function alterarQtdLoja(produto, lojaId, novaQtdLoja) {
 
 async function aumentar(produto) {
   const loja = estado.lojaAtiva;
+  limparBuscaAposAcao(produto.id);
   showLoading("Atualizando...");
   try {
     await alterarQtdLoja(produto, loja, qtdNaLoja(produto, loja) + 1);
@@ -1391,6 +1514,7 @@ async function diminuir(produto) {
   const loja = estado.lojaAtiva;
   const atual = qtdNaLoja(produto, loja);
   if (atual <= 0) { showToast(`Quantidade na ${nomeLoja(loja)} já é zero`, "⚠️"); return; }
+  limparBuscaAposAcao(produto.id);
   showLoading("Atualizando...");
   try {
     await alterarQtdLoja(produto, loja, atual - 1);
@@ -1445,6 +1569,7 @@ async function confirmarAjusteQtd(tipo) {
   try {
     await alterarQtdLoja(estado.produtoAtual.produto, estado.produtoAtual.loja, novaQtd);
     fecharModal("modalRemoverQtd");
+    limparBuscaAposAcao(estado.produtoAtual.id);
     showToast(
       isAdd
         ? `+${qtd} em "${estado.produtoAtual.nome}" (${nomeLoja(estado.produtoAtual.loja)})`
@@ -1608,6 +1733,7 @@ window.salvarEdicao = async function () {
     }
 
     fecharModal("modalEditar");
+    limparBuscaAposAcao(id);
     showToast(`"${novoNome}" atualizado!`);
     await mostrarProdutos();
   } catch (err) {
@@ -1705,6 +1831,7 @@ async function remover(id, nome) {
       estado.ordemReposicao = estado.ordemReposicao.filter(x => x !== id);
     }
 
+    limparBuscaAposAcao(null);
     showToast(`"${nome}" removido`, "🗑️");
     await mostrarProdutos();
   } catch (err) {
@@ -2163,7 +2290,8 @@ window.alternarScannerBusca = async function () {
     onDetect: (codigo) => {
       const campo = document.getElementById("campoBusca");
       campo.value = codigo;
-      estado.termoBusca = codigo.toLowerCase();
+      estado.termoBusca = normalizarBusca(codigo);
+      atualizarBotaoLimparBusca();
 
       // Limpa o filtro de local pra não esconder o produto escaneado
       estado.filtroEstoque = "";
@@ -2418,6 +2546,9 @@ document.getElementById("campoBusca").addEventListener("keydown", (e) => {
   }
 });
 document.getElementById("btnBuscaCam").addEventListener("click", window.alternarScannerBusca);
+document.getElementById("btnLimparBusca").addEventListener("click", limparBusca);
+document.getElementById("campoBusca").addEventListener("input", atualizarBotaoLimparBusca);
+atualizarBotaoLimparBusca();
 
 // Os chips de filtro por local são criados dinamicamente em
 // renderizarFiltrosEstoque() — os eventos são ligados lá.

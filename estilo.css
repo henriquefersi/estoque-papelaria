@@ -2051,3 +2051,44 @@ ul { list-style: none; padding: 0; }
   .area-impressao td:nth-child(6),
   .area-impressao th:nth-child(6) { width: 96px !important; text-align: left !important; white-space: nowrap; font-size: 11px; }
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   BUSCA: botão ✕ e destaque do produto
+   ═══════════════════════════════════════════════════════════════ */
+
+/* Espaço para o ✕ e para a câmera dentro da caixa */
+#campoBusca { padding-right: 86px !important; }
+
+.btn-limpar-busca {
+  position: absolute;
+  right: 48px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.08);
+  color: var(--text-muted);
+  font-size: 13px;
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.18s, color 0.18s;
+}
+
+.btn-limpar-busca:hover {
+  background: rgba(248,113,113,0.18);
+  color: var(--red);
+}
+
+/* Piscada no produto depois que a busca limpa sozinha */
+@keyframes destaqueProduto {
+  0%   { box-shadow: 0 0 0 0 rgba(124,106,247,0.0); border-color: var(--border); }
+  20%  { box-shadow: 0 0 0 4px rgba(124,106,247,0.55); border-color: var(--accent); }
+  100% { box-shadow: 0 0 0 0 rgba(124,106,247,0.0); }
+}
+
+.produto-item.produto-destaque {
+  animation: destaqueProduto 1.6s ease;
+}
